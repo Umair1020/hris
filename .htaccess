@@ -8,6 +8,9 @@ ServerSignature Off
 <IfModule mod_headers.c>
   Header set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
   Header set X-Content-Type-Options "nosniff"
+  # Allow camera + GPS for attendance selfie / geofence (mobile browsers)
+  Header set Permissions-Policy "camera=(self), microphone=(), geolocation=(self)"
+  Header set Feature-Policy "camera 'self'; geolocation 'self'; microphone 'none'"
 </IfModule>
 
 # Protect sensitive files

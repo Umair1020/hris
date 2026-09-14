@@ -10,7 +10,8 @@
 require_once __DIR__ . '/../../includes/header.php';
 // No auth required — this is a public page
 // Pass security settings to JavaScript
-$attSelfie = get_setting('att_selfie_required', '0') === '1';
+// Default selfie ON (matches Settings page default) so front-camera flow is active
+$attSelfie = get_setting('att_selfie_required', '1') === '1';
 $attGeofence = get_setting('att_geofence_enabled', '0') === '1';
 $officeLat = get_setting('att_office_lat', '');
 $officeLng = get_setting('att_office_lng', '');
@@ -29,7 +30,10 @@ if (isset($_GET['auto']) && is_logged_in()) {
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta http-equiv="Permissions-Policy" content="camera=(self), microphone=(), geolocation=(self)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>Mark Attendance · <?= APP_COMPANY ?></title>
 <link rel="icon" type="image/png" href="<?= asset('img/favicon.png') ?>">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Mulish:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -118,39 +122,97 @@ var OFFICE_LAT = <?= (float)$officeLat ?: '0' ?>;
 var OFFICE_LNG = <?= (float)$officeLng ?: '0' ?>;
 var GEOFENCE_RADIUS = <?= $geofenceRadius ?>;
 
+function stopScanner() {
+  return new Promise(function(resolve) {
+    if (!html5QrCode) { resolve(); return; }
+    try {
+      html5QrCode.stop().then(function() {
+        try { html5QrCode.clear(); } catch(e){}
+        html5QrCode = null;
+        resolve();
+      }).catch(function() {
+        try { html5QrCode.clear(); } catch(e){}
+        html5QrCode = null;
+        resolve();
+      });
+    } catch(e) {
+      html5QrCode = null;
+      resolve();
+    }
+  });
+}
+
 function startScanner() {
-  if (html5QrCode) { try { html5QrCode.clear(); } catch(e){} }
-  html5QrCode = new Html5Qrcode("reader");
-  html5QrCode.start(
-    { facingMode: "environment" },
-    { fps: 10, qrbox: { width: 220, height: 220 } },
-    onScanSuccess,
-    function(err) {}
-  ).catch(function(err) {
-    document.getElementById('reader').innerHTML = '<div style="padding:40px;text-align:center;color:#666"><i class="fa-solid fa-camera-slash" style="font-size:30px"></i><p style="margin:10px 0;font-size:13px">Camera not available.<br>Use "Enter Code" tab instead.</p></div>';
+  var reader = document.getElementById('reader');
+  if (!reader) return;
+  // Ensure secure context + mediaDevices available
+  if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    reader.innerHTML = '<div style="padding:40px;text-align:center;color:#666"><i class="fa-solid fa-camera-slash" style="font-size:30px"></i><p style="margin:10px 0;font-size:13px">Camera needs HTTPS.<br>Use "Enter Code" tab instead.</p></div>';
+    return;
+  }
+  stopScanner().then(function() {
+    // Re-create scanner box if previous error wiped it
+    if (!document.getElementById('reader')) return;
+    reader.innerHTML = '';
+    html5QrCode = new Html5Qrcode("reader");
+    var configs = [
+      { facingMode: { ideal: "environment" } },
+      { facingMode: "environment" },
+      { facingMode: "user" },
+      true // any camera
+    ];
+    function tryStart(i) {
+      if (i >= configs.length) {
+        reader.innerHTML = '<div style="padding:40px;text-align:center;color:#666"><i class="fa-solid fa-camera-slash" style="font-size:30px"></i><p style="margin:10px 0;font-size:13px">Camera not available.<br>Allow camera permission, or use "Enter Code" tab.</p></div>';
+        return;
+      }
+      html5QrCode.start(
+        configs[i],
+        { fps: 10, qrbox: { width: 220, height: 220 }, aspectRatio: 1.0 },
+        onScanSuccess,
+        function(err) {}
+      ).catch(function() { tryStart(i + 1); });
+    }
+    tryStart(0);
   });
 }
 
 function onScanSuccess(decodedText) {
   if (scannedCode === decodedText) return;
   scannedCode = decodedText;
-  if (html5QrCode) { try { html5QrCode.stop(); } catch(e){} }
-  lookupEmployee(decodedText.trim());
+  stopScanner().then(function() {
+    lookupEmployee(decodedText.trim());
+  });
 }
 
 function switchTab(tab) {
   document.querySelectorAll('.tab-btns button').forEach(function(b){b.classList.remove('active')});
-  if(event) event.target.closest('button').classList.add('active');
+  if(event && event.target) {
+    var btn = event.target.closest('button');
+    if (btn) btn.classList.add('active');
+  } else {
+    var btns = document.querySelectorAll('.tab-btns button');
+    if (tab === 'scan' && btns[0]) btns[0].classList.add('active');
+    if (tab === 'manual' && btns[1]) btns[1].classList.add('active');
+  }
   if (tab === 'scan') {
     document.getElementById('scanTab').style.display = '';
     document.getElementById('manualTab').style.display = 'none';
     scannedCode = null;
+    // Restore scanner box markup if it was wiped
+    var reader = document.getElementById('reader');
+    if (!reader) {
+      document.getElementById('scanTab').innerHTML =
+        '<div class="scanner-box" id="reader"></div>' +
+        '<p class="muted small center" style="margin-top:14px;text-align:center"><i class="fa-solid fa-camera"></i> Point your camera at the QR code on your ID card</p>';
+    }
     startScanner();
   } else {
     document.getElementById('scanTab').style.display = 'none';
     document.getElementById('manualTab').style.display = '';
-    if (html5QrCode) { try { html5QrCode.stop(); } catch(e){} }
-    document.getElementById('manualCode').focus();
+    stopScanner();
+    var mc = document.getElementById('manualCode');
+    if (mc) mc.focus();
   }
 }
 
@@ -194,6 +256,8 @@ function lookupEmployee(code) {
 }
 
 function showEmployee(data) {
+  // Make sure QR camera is fully released before Clock In UI (selfie needs front cam)
+  stopScanner();
   document.getElementById('mainCard').style.display = 'none';
   document.getElementById('empCard').style.display = '';
   document.getElementById('empInfo').innerHTML =
@@ -222,91 +286,251 @@ function startMark(code, action) {
   pendingSelfie = null;
   showLoader(true);
 
-  // Step 1: Get location
-  if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(
-      function(pos) {
-        pendingLocation = pos.coords.latitude + ',' + pos.coords.longitude;
-        // Step 2: If selfie required, open camera
-        if (SELFIE_REQUIRED) { showLoader(false); openSelfieCam(); }
-        else { doFinalMark(); }
-      },
-      function() {
-        pendingLocation = 'location-unavailable';
-        if (SELFIE_REQUIRED) { showLoader(false); openSelfieCam(); }
-        else { doFinalMark(); }
-      },
-      { timeout: 8000, enableHighAccuracy: true }
-    );
-  } else {
-    pendingLocation = 'location-unavailable';
-    if (SELFIE_REQUIRED) { showLoader(false); openSelfieCam(); }
-    else { doFinalMark(); }
-  }
+  // Always free any QR scanner camera before location / selfie (critical on mobile)
+  stopScanner().then(function() {
+    function afterLocation() {
+      if (SELFIE_REQUIRED) {
+        showLoader(false);
+        openSelfieCam();
+      } else {
+        doFinalMark();
+      }
+    }
+
+    // Step 1: Get location
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        function(pos) {
+          pendingLocation = pos.coords.latitude + ',' + pos.coords.longitude;
+          afterLocation();
+        },
+        function() {
+          pendingLocation = 'location-unavailable';
+          afterLocation();
+        },
+        { timeout: 10000, enableHighAccuracy: true, maximumAge: 0 }
+      );
+    } else {
+      pendingLocation = 'location-unavailable';
+      afterLocation();
+    }
+  });
 }
 
 // --- Selfie camera ---
 var selfieStream = null;
-function openSelfieCam() {
-  var actionArea = document.getElementById('actionArea');
-  actionArea.innerHTML =
-    '<div style="text-align:center">' +
-    '<h3 class="section-title" style="margin-bottom:12px"><i class="fa-solid fa-camera"></i> Selfie Verification</h3>' +
-    '<p class="muted small" style="margin-bottom:14px">Please look at the camera. Your photo will be taken for verification.</p>' +
-    '<div style="border-radius:14px;overflow:hidden;max-width:260px;margin:0 auto 14px;border:3px solid var(--primary)">' +
-    '<video id="selfieVideo" autoplay playsinline style="width:100%;display:block;transform:scaleX(-1)"></video>' +
-    '<canvas id="selfieCanvas" style="display:none"></canvas>' +
-    '<img id="selfiePreview" style="display:none;width:100%">' +
-    '</div>' +
-    '<button class="btn btn-primary btn-block" id="snapBtn" onclick="takeSelfie()"><i class="fa-solid fa-camera"></i> Take Photo</button>' +
-    '<button class="btn btn-success btn-block" id="confirmBtn" style="display:none;margin-top:8px" onclick="confirmSelfie()"><i class="fa-solid fa-check"></i> Confirm &amp; Submit</button>' +
-    '<button class="btn btn-light btn-block" style="margin-top:8px" onclick="retakeSelfie()" id="retakeBtn" style="display:none">Retake</button>' +
-    '</div>';
 
-  navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } })
-    .then(function(stream) {
-      selfieStream = stream;
-      document.getElementById('selfieVideo').srcObject = stream;
-    })
-    .catch(function() {
-      // Camera not available — proceed without selfie
-      alert('Camera not available. Proceeding without selfie.');
-      doFinalMark();
+function stopSelfieStream() {
+  if (selfieStream) {
+    try { selfieStream.getTracks().forEach(function(t){ t.stop(); }); } catch(e){}
+    selfieStream = null;
+  }
+}
+
+/** Try getUserMedia with multiple constraint fallbacks (front cam first). */
+function requestCamera(constraintsList) {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    return Promise.reject(new Error('getUserMedia not supported'));
+  }
+  var list = constraintsList.slice();
+  function next() {
+    if (!list.length) return Promise.reject(new Error('All camera constraints failed'));
+    var c = list.shift();
+    return navigator.mediaDevices.getUserMedia(c).catch(function() { return next(); });
+  }
+  return next();
+}
+
+/** Build constraint list preferring the front / user-facing camera. */
+function buildFrontCamConstraints() {
+  var base = [
+    { audio: false, video: { facingMode: { exact: 'user' }, width: { ideal: 640 }, height: { ideal: 480 } } },
+    { audio: false, video: { facingMode: { ideal: 'user' }, width: { ideal: 640 }, height: { ideal: 480 } } },
+    { audio: false, video: { facingMode: 'user' } },
+    { audio: false, video: true },
+    { video: true }
+  ];
+  // Some Androids ignore facingMode — pick deviceId labeled front/user/selfie
+  if (!navigator.mediaDevices.enumerateDevices) {
+    return Promise.resolve(base);
+  }
+  return navigator.mediaDevices.enumerateDevices().then(function(devices) {
+    var cams = devices.filter(function(d){ return d.kind === 'videoinput'; });
+    var front = cams.find(function(d){
+      var L = (d.label || '').toLowerCase();
+      return L.indexOf('front') >= 0 || L.indexOf('user') >= 0 || L.indexOf('selfie') >= 0 || L.indexOf('facing') >= 0;
     });
+    // If labels empty (no prior permission), still try facingMode first
+    if (front && front.deviceId) {
+      base.unshift({ audio: false, video: { deviceId: { exact: front.deviceId } } });
+      base.unshift({ audio: false, video: { deviceId: { ideal: front.deviceId } } });
+    } else if (cams.length > 1) {
+      // Heuristic: on many phones index 1 is front, or last cam is front
+      var guess = cams[cams.length - 1];
+      if (guess && guess.deviceId) {
+        base.splice(2, 0, { audio: false, video: { deviceId: { ideal: guess.deviceId } } });
+      }
+    }
+    return base;
+  }).catch(function(){ return base; });
+}
+
+function openSelfieCam() {
+  // Release QR / any previous camera first so front camera can open
+  stopScanner().then(function() {
+    stopSelfieStream();
+    // Brief pause so mobile OS fully releases rear camera hardware
+    setTimeout(function() { actuallyOpenSelfie(); }, 350);
+  });
+}
+
+function actuallyOpenSelfie() {
+    var actionArea = document.getElementById('actionArea');
+    if (!actionArea) return;
+    actionArea.innerHTML =
+      '<div style="text-align:center">' +
+      '<h3 class="section-title" style="margin-bottom:12px"><i class="fa-solid fa-camera"></i> Selfie Verification</h3>' +
+      '<p class="muted small" style="margin-bottom:14px">Please look at the front camera. Your photo will be taken for verification.</p>' +
+      '<div id="selfieBox" style="border-radius:14px;overflow:hidden;max-width:280px;margin:0 auto 14px;border:3px solid var(--primary);background:#111;min-height:200px;position:relative">' +
+      '<video id="selfieVideo" autoplay playsinline muted webkit-playsinline style="width:100%;height:auto;display:block;transform:scaleX(-1);background:#000;min-height:200px;object-fit:cover"></video>' +
+      '<canvas id="selfieCanvas" style="display:none"></canvas>' +
+      '<img id="selfiePreview" style="display:none;width:100%;transform:scaleX(-1)">' +
+      '<div id="selfieStatus" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;background:rgba(0,0,0,.55);padding:16px">' +
+      '<span><i class="fa-solid fa-spinner fa-spin"></i> Opening front camera...</span></div>' +
+      '</div>' +
+      '<button class="btn btn-primary btn-block" id="snapBtn" onclick="takeSelfie()" disabled style="opacity:.5"><i class="fa-solid fa-camera"></i> Take Photo</button>' +
+      '<button class="btn btn-success btn-block" id="confirmBtn" style="display:none;margin-top:8px" onclick="confirmSelfie()"><i class="fa-solid fa-check"></i> Confirm &amp; Submit</button>' +
+      '<button class="btn btn-light btn-block" id="retakeBtn" style="display:none;margin-top:8px" onclick="retakeSelfie()"><i class="fa-solid fa-rotate-left"></i> Retake</button>' +
+      '<button class="btn btn-light btn-block" style="margin-top:8px" onclick="skipSelfie()"><i class="fa-solid fa-forward"></i> Skip selfie</button>' +
+      '<p id="selfieErr" class="muted small" style="margin-top:10px;display:none;color:#dc2626"></p>' +
+      '</div>';
+
+    // Front camera first (deviceId + facingMode fallbacks), then any camera
+    buildFrontCamConstraints().then(function(constraints) {
+      return requestCamera(constraints);
+    })
+      .then(function(stream) {
+        selfieStream = stream;
+        var video = document.getElementById('selfieVideo');
+        if (!video) return;
+        video.setAttribute('playsinline', 'true');
+        video.setAttribute('webkit-playsinline', 'true');
+        video.muted = true;
+        video.srcObject = stream;
+
+        var playPromise = video.play();
+        if (playPromise && typeof playPromise.then === 'function') {
+          playPromise.catch(function(){ /* autoplay policy — still show frame */ });
+        }
+
+        // Wait until video has real frames before enabling snap
+        var ready = function() {
+          var st = document.getElementById('selfieStatus');
+          if (st) st.style.display = 'none';
+          var snap = document.getElementById('snapBtn');
+          if (snap) { snap.disabled = false; snap.style.opacity = '1'; }
+        };
+        if (video.readyState >= 2) ready();
+        else {
+          video.onloadedmetadata = function() {
+            video.play().catch(function(){});
+            ready();
+          };
+          video.onplaying = ready;
+          // Safety timeout if metadata never fires
+          setTimeout(ready, 2500);
+        }
+      })
+      .catch(function(err) {
+        var st = document.getElementById('selfieStatus');
+        if (st) st.style.display = 'none';
+        var msg = 'Front camera could not be opened.';
+        if (err && err.name === 'NotAllowedError') {
+          msg = 'Camera permission denied. Please allow camera access in browser settings and try again.';
+        } else if (err && err.name === 'NotFoundError') {
+          msg = 'No camera found on this device.';
+        } else if (err && err.name === 'NotReadableError') {
+          msg = 'Camera is busy (used by another app). Close other apps and retry.';
+        } else if (!window.isSecureContext) {
+          msg = 'Camera requires HTTPS. Open the site with https://';
+        }
+        var errEl = document.getElementById('selfieErr');
+        if (errEl) { errEl.style.display = 'block'; errEl.textContent = msg; }
+        var snap = document.getElementById('snapBtn');
+        if (snap) snap.style.display = 'none';
+        // Keep Skip button so user is not stuck
+      });
 }
 
 function takeSelfie() {
   var video = document.getElementById('selfieVideo');
   var canvas = document.getElementById('selfieCanvas');
-  canvas.width = 480; canvas.height = 480;
+  if (!video || !canvas) return;
+  if (!video.videoWidth || !video.videoHeight) {
+    alert('Camera is still loading. Please wait a second and try again.');
+    return;
+  }
+  // Capture at actual video resolution (capped)
+  var w = Math.min(video.videoWidth, 640);
+  var h = Math.min(video.videoHeight, 640);
+  // Keep square crop from center for consistent selfie
+  var size = Math.min(w, h, 480);
+  canvas.width = size;
+  canvas.height = size;
   var ctx = canvas.getContext('2d');
-  ctx.drawImage(video, 0, 0, 480, 480);
-  pendingSelfie = canvas.toDataURL('image/jpeg', 0.7);
-  document.getElementById('selfiePreview').src = pendingSelfie;
-  document.getElementById('selfiePreview').style.display = 'block';
-  document.getElementById('selfieVideo').style.display = 'none';
+  // Mirror to match preview (front camera)
+  ctx.translate(size, 0);
+  ctx.scale(-1, 1);
+  var sx = (video.videoWidth - video.videoHeight) / 2;
+  if (sx < 0) {
+    var sy = (video.videoHeight - video.videoWidth) / 2;
+    ctx.drawImage(video, 0, sy, video.videoWidth, video.videoWidth, 0, 0, size, size);
+  } else {
+    ctx.drawImage(video, sx, 0, video.videoHeight, video.videoHeight, 0, 0, size, size);
+  }
+  pendingSelfie = canvas.toDataURL('image/jpeg', 0.75);
+  var preview = document.getElementById('selfiePreview');
+  preview.src = pendingSelfie;
+  preview.style.display = 'block';
+  preview.style.transform = 'none'; // already mirrored in canvas
+  video.style.display = 'none';
   document.getElementById('snapBtn').style.display = 'none';
   document.getElementById('confirmBtn').style.display = '';
+  document.getElementById('retakeBtn').style.display = '';
 }
 
 function retakeSelfie() {
+  pendingSelfie = null;
   document.getElementById('selfiePreview').style.display = 'none';
   document.getElementById('selfieVideo').style.display = 'block';
   document.getElementById('snapBtn').style.display = '';
   document.getElementById('confirmBtn').style.display = 'none';
+  document.getElementById('retakeBtn').style.display = 'none';
+}
+
+function skipSelfie() {
+  stopSelfieStream();
+  pendingSelfie = null;
+  if (!confirm('Continue without selfie photo?')) return;
+  doFinalMark();
 }
 
 function confirmSelfie() {
-  if (selfieStream) { selfieStream.getTracks().forEach(function(t){ t.stop(); }); }
+  if (!pendingSelfie) {
+    alert('Please take a photo first.');
+    return;
+  }
+  stopSelfieStream();
   doFinalMark();
 }
 
 function doFinalMark() {
-  if (selfieStream) { selfieStream.getTracks().forEach(function(t){ t.stop(); }); }
+  stopSelfieStream();
   showLoader(true);
-  var body = 'action=mark&code=' + encodeURIComponent(pendingCode) + '&location=' + encodeURIComponent(pendingLocation);
+  var body = 'action=mark&code=' + encodeURIComponent(pendingCode) + '&location=' + encodeURIComponent(pendingLocation || 'location-unavailable');
   if (pendingSelfie) body += '&selfie=' + encodeURIComponent(pendingSelfie);
   if (pendingAction === 'out' && pendingSelfie) body += '&selfie_type=out';
+  else if (pendingAction === 'in' && pendingSelfie) body += '&selfie_type=in';
 
   fetch(API_URL, {
     method: 'POST',
@@ -351,10 +575,28 @@ function showCompleted(data) {
 }
 
 function resetAll() {
-  document.getElementById('mainCard').style.display = '';
-  document.getElementById('empCard').style.display = 'none';
-  scannedCode = null;
-  switchTab('scan');
+  stopSelfieStream();
+  stopScanner().then(function() {
+    document.getElementById('mainCard').style.display = '';
+    document.getElementById('empCard').style.display = 'none';
+    scannedCode = null;
+    pendingCode = null;
+    pendingAction = null;
+    pendingLocation = null;
+    pendingSelfie = null;
+    // Restore scan tab markup
+    var scanTab = document.getElementById('scanTab');
+    if (scanTab) {
+      scanTab.innerHTML =
+        '<div class="scanner-box" id="reader"></div>' +
+        '<p class="muted small center" style="margin-top:14px;text-align:center"><i class="fa-solid fa-camera"></i> Point your camera at the QR code on your ID card</p>';
+    }
+    if (AUTO_CODE) {
+      lookupEmployee(AUTO_CODE);
+    } else {
+      switchTab('scan');
+    }
+  });
 }
 
 function init() {
