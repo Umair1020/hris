@@ -1,0 +1,24 @@
+{
+  "name": "Spotcomm HRIS",
+  "short_name": "Spotcomm HRIS",
+  "description": "Spotcomm Global HRIS - Attendance, Payroll, Leave Management",
+  "start_url": "/index.php",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#2A1B3D",
+  "theme_color": "#7F3E98",
+  "icons": [
+    {
+      "src": "/assets/img/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/img/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

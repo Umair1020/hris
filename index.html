@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spotcomm HRIS</title>
+
+<!-- INSTANT redirect to the app. This works no matter what the server's
+     DirectoryIndex / .htaccess / cache is doing, because index.html is
+     ALWAYS served as a default document by Apache. -->
+<meta http-equiv="refresh" content="0; url=index.php">
+
+<!-- Tell browsers/CDNs NOT to cache this redirect page -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+
+<!-- JS redirect as backup (instant, no flash) -->
+<script>window.location.replace('index.php');</script>
+
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Mulish,Arial,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;color:#2A1B3D;background:linear-gradient(135deg,#f8f5fc,#ffffff)}
+  .logo{font-size:28px;font-weight:800;color:#7F3E98;letter-spacing:.5px;margin-bottom:24px}
+  .spinner{border:4px solid #eee;border-top:4px solid #7F3E98;border-radius:50%;width:42px;height:42px;animation:spin 1s linear infinite}
+  h2{font-weight:600;margin:22px 0 6px}
+  p{color:#6b7280;margin:0}
+  a{color:#7F3E98;font-weight:700}
+  @keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+  <div class="logo">Spotcomm HRIS</div>
+  <div class="spinner"></div>
+  <h2>Loading…</h2>
+  <p>If you are not redirected, <a href="index.php">click here to continue</a>.</p>
+</body>
+</html>
