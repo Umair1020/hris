@@ -1,0 +1,52 @@
+# ==========================================================================
+# SPOTCOMM GLOBAL HRIS - ROOT .HTACCESS
+# ==========================================================================
+Options -Indexes
+ServerSignature Off
+
+# Disable all caching (fixes instant update issues on cPanel)
+<IfModule mod_headers.c>
+  Header set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+  Header set X-Content-Type-Options "nosniff"
+</IfModule>
+
+# Protect sensitive files
+<FilesMatch "(^\.|\.(env|sql|md|log|ini|sh|bak)$)">
+  Require all denied
+</FilesMatch>
+
+# Deny config directory
+RedirectMatch 403 ^/.*/config/.*$
+
+AddDefaultCharset UTF-8
+
+# GZIP compression
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/css text/javascript application/javascript application/json image/svg+xml
+</IfModule>
+
+# Expire headers (0 seconds for PHP/HTML so updates reflect instantly)
+<IfModule mod_expires.c>
+  ExpiresActive On
+  ExpiresByType text/html "access plus 0 seconds"
+  ExpiresByType application/x-httpd-php "access plus 0 seconds"
+  ExpiresByType text/css "access plus 1 hour"
+  ExpiresByType application/javascript "access plus 1 hour"
+  ExpiresByType image/png "access plus 7 days"
+  ExpiresByType image/svg+xml "access plus 7 days"
+</IfModule>
+
+# PHP production settings
+<IfModule mod_php.c>
+  php_flag display_errors Off
+  php_flag log_errors On
+  php_value upload_max_filesize 15M
+  php_value post_max_size 15M
+</IfModule>
+
+# php -- BEGIN cPanel-generated handler, do not edit
+# Set the “ea-php74” package as the default “PHP” programming language.
+<IfModule mime_module>
+  AddHandler application/x-httpd-ea-php74 .php .php7 .phtml
+</IfModule>
+# php -- END cPanel-generated handler, do not edit
