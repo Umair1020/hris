@@ -475,6 +475,20 @@ function save_setting($key, $value)
 }
 
 /**
+ * Save base64 selfie data to file in assets/uploads/selfies/
+ */
+function save_selfie_image($base64, $prefix = 'selfie')
+{
+    $dir = UPLOAD_DIR . 'selfies/';
+    if (!is_dir($dir)) mkdir($dir, 0755, true);
+    $data = base64_decode(preg_replace('#^data:image/\w+;base64,#i', '', $base64));
+    if (!$data) return null;
+    $filename = $prefix . '_' . date('Ymd_His') . '.jpg';
+    file_put_contents($dir . $filename, $data);
+    return 'selfies/' . $filename;
+}
+
+/**
  * AUTO-CLEANUP: Delete attendance selfies older than 30 days
  * Runs silently in background. Removes image files to save server storage.
  * Attendance records (time, location, status) are preserved — only photos deleted.

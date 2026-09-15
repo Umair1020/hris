@@ -9,8 +9,8 @@
  */
 require_once __DIR__ . '/../../includes/header.php';
 // No auth required — this is a public page
-// Pass security settings to JavaScript
-$attSelfie = get_setting('att_selfie_required', '0') === '1';
+// Pass security settings to JavaScript (default selfie to 1)
+$attSelfie = get_setting('att_selfie_required', '1') === '1';
 $attGeofence = get_setting('att_geofence_enabled', '0') === '1';
 $officeLat = get_setting('att_office_lat', '');
 $officeLng = get_setting('att_office_lng', '');
@@ -83,7 +83,10 @@ body{background:var(--grad-dark);min-height:100vh;margin:0}
     </div>
     <div id="scanTab">
       <div class="scanner-box" id="reader"></div>
-      <p class="muted small center" style="margin-top:14px;text-align:center"><i class="fa-solid fa-camera"></i> Point your camera at the QR code on your ID card</p>
+      <div style="display:flex;justify-content:center;gap:10px;margin-top:10px">
+        <button type="button" class="btn btn-sm btn-light" onclick="toggleQrCam()"><i class="fa-solid fa-camera-rotate"></i> Flip Scanner Camera</button>
+      </div>
+      <p class="muted small center" style="margin-top:10px;text-align:center"><i class="fa-solid fa-camera"></i> Point your camera at the QR code on your ID card</p>
     </div>
     <div id="manualTab" style="display:none">
       <label>Employee Code</label>
@@ -118,17 +121,59 @@ var OFFICE_LAT = <?= (float)$officeLat ?: '0' ?>;
 var OFFICE_LNG = <?= (float)$officeLng ?: '0' ?>;
 var GEOFENCE_RADIUS = <?= $geofenceRadius ?>;
 
+var qrFacingMode = "environment";
+
 function startScanner() {
+  if (html5QrCode) {
+    try {
+      html5QrCode.stop().then(function() { runQr(); }).catch(function() { runQr(); });
+      return;
+    } catch(e) {
+      runQr();
+      return;
+    }
+  }
+  runQr();
+}
+
+function runQr() {
   if (html5QrCode) { try { html5QrCode.clear(); } catch(e){} }
   html5QrCode = new Html5Qrcode("reader");
-  html5QrCode.start(
-    { facingMode: "environment" },
-    { fps: 10, qrbox: { width: 220, height: 220 } },
-    onScanSuccess,
-    function(err) {}
-  ).catch(function(err) {
-    document.getElementById('reader').innerHTML = '<div style="padding:40px;text-align:center;color:#666"><i class="fa-solid fa-camera-slash" style="font-size:30px"></i><p style="margin:10px 0;font-size:13px">Camera not available.<br>Use "Enter Code" tab instead.</p></div>';
+
+  function startWith(facing) {
+    return html5QrCode.start(
+      { facingMode: facing },
+      { fps: 10, qrbox: { width: 220, height: 220 } },
+      onScanSuccess,
+      function(err) {}
+    );
+  }
+
+  startWith(qrFacingMode).catch(function(err) {
+    console.warn('QR camera mode (' + qrFacingMode + ') failed:', err);
+    // If environment camera failed (laptop/PC webcam), fallback to front (user) camera
+    if (qrFacingMode === "environment") {
+      qrFacingMode = "user";
+      startWith("user").catch(function(err2) {
+        showQrError();
+      });
+    } else {
+      showQrError();
+    }
   });
+}
+
+function showQrError() {
+  document.getElementById('reader').innerHTML =
+    '<div style="padding:40px;text-align:center;color:#666">' +
+    '<i class="fa-solid fa-camera-slash" style="font-size:30px"></i>' +
+    '<p style="margin:10px 0;font-size:13px">Camera not available.<br>Use "Enter Code" tab instead.</p>' +
+    '</div>';
+}
+
+function toggleQrCam() {
+  qrFacingMode = (qrFacingMode === "environment") ? "user" : "environment";
+  startScanner();
 }
 
 function onScanSuccess(decodedText) {
@@ -210,7 +255,7 @@ function showEmployee(data) {
   document.getElementById('actionArea').innerHTML =
     '<button class="action-btn ' + btnClass + '" onclick="startMark(\'' + data.code + '\', \'' + data.next_action + '\')">' +
     '<i class="fa-solid ' + btnIcon + '"></i> ' + btnText + '</button>' +
-    '<p class="muted small center" style="text-align:center;margin-top:10px"><i class="fa-solid fa-location-dot"></i> Your location will be verified' + (SELFIE_REQUIRED ? ' · <i class="fa-solid fa-camera"></i> Selfie required' : '') + '</p>';
+    '<p class="muted small center" style="text-align:center;margin-top:10px"><i class="fa-solid fa-location-dot"></i> Location will be verified' + (SELFIE_REQUIRED ? ' · <i class="fa-solid fa-camera"></i> Front Camera Selfie required' : '') + '</p>';
 }
 
 // --- Attendance marking flow with selfie + geofence ---
@@ -227,82 +272,319 @@ function startMark(code, action) {
     navigator.geolocation.getCurrentPosition(
       function(pos) {
         pendingLocation = pos.coords.latitude + ',' + pos.coords.longitude;
-        // Step 2: If selfie required, open camera
-        if (SELFIE_REQUIRED) { showLoader(false); openSelfieCam(); }
+        showLoader(false);
+        // Step 2: Open front camera for selfie
+        if (SELFIE_REQUIRED) { openSelfieCam(); }
         else { doFinalMark(); }
       },
       function() {
         pendingLocation = 'location-unavailable';
-        if (SELFIE_REQUIRED) { showLoader(false); openSelfieCam(); }
+        showLoader(false);
+        if (SELFIE_REQUIRED) { openSelfieCam(); }
         else { doFinalMark(); }
       },
       { timeout: 8000, enableHighAccuracy: true }
     );
   } else {
     pendingLocation = 'location-unavailable';
-    if (SELFIE_REQUIRED) { showLoader(false); openSelfieCam(); }
+    showLoader(false);
+    if (SELFIE_REQUIRED) { openSelfieCam(); }
     else { doFinalMark(); }
   }
 }
 
-// --- Selfie camera ---
+// --- Selfie camera management (Front camera default, switch option & fallback) ---
 var selfieStream = null;
+var currentFacingMode = 'user'; // 'user' (front) or 'environment' (back)
+
 function openSelfieCam() {
+  currentFacingMode = 'user';
   var actionArea = document.getElementById('actionArea');
   actionArea.innerHTML =
     '<div style="text-align:center">' +
-    '<h3 class="section-title" style="margin-bottom:12px"><i class="fa-solid fa-camera"></i> Selfie Verification</h3>' +
-    '<p class="muted small" style="margin-bottom:14px">Please look at the camera. Your photo will be taken for verification.</p>' +
-    '<div style="border-radius:14px;overflow:hidden;max-width:260px;margin:0 auto 14px;border:3px solid var(--primary)">' +
-    '<video id="selfieVideo" autoplay playsinline style="width:100%;display:block;transform:scaleX(-1)"></video>' +
-    '<canvas id="selfieCanvas" style="display:none"></canvas>' +
-    '<img id="selfiePreview" style="display:none;width:100%">' +
+    '<h3 class="section-title" style="margin-bottom:6px"><i class="fa-solid fa-camera"></i> Selfie Verification</h3>' +
+    '<p class="muted small" style="margin-bottom:12px">Look at your front camera to take a verification photo.</p>' +
+    '<div style="display:flex;justify-content:center;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">' +
+      '<span id="camModeTitle" class="badge badge-purple" style="font-size:12px;padding:6px 12px"><i class="fa-solid fa-user"></i> Front Camera Active</span>' +
+      '<button type="button" class="btn btn-sm btn-light" id="switchCamBtn" onclick="switchCamera()"><i class="fa-solid fa-camera-rotate"></i> Flip Camera</button>' +
+      '<label class="btn btn-sm btn-outline" id="fileFallbackBtn" style="cursor:pointer;margin:0" title="Take selfie with native phone camera"><i class="fa-solid fa-camera"></i> Native Camera<input type="file" id="selfieFileInput" accept="image/*" capture="user" style="display:none" onchange="handleSelfieFile(this)"></label>' +
     '</div>' +
-    '<button class="btn btn-primary btn-block" id="snapBtn" onclick="takeSelfie()"><i class="fa-solid fa-camera"></i> Take Photo</button>' +
-    '<button class="btn btn-success btn-block" id="confirmBtn" style="display:none;margin-top:8px" onclick="confirmSelfie()"><i class="fa-solid fa-check"></i> Confirm &amp; Submit</button>' +
-    '<button class="btn btn-light btn-block" style="margin-top:8px" onclick="retakeSelfie()" id="retakeBtn" style="display:none">Retake</button>' +
+    '<div style="border-radius:14px;overflow:hidden;max-width:280px;aspect-ratio:1;margin:0 auto 14px;border:3px solid var(--primary);position:relative;background:#000">' +
+      '<video id="selfieVideo" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;display:block;transform:scaleX(-1)"></video>' +
+      '<canvas id="selfieCanvas" style="display:none"></canvas>' +
+      '<img id="selfiePreview" style="display:none;width:100%;height:100%;object-fit:cover">' +
+      '<div id="videoLoader" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,.6);color:#fff;font-size:13px">' +
+        '<div class="spin" style="width:36px;height:36px;border-width:3px;margin-bottom:8px"></div>' +
+        '<span>Starting Front Camera...</span>' +
+      '</div>' +
+    '</div>' +
+    '<div id="camFallbackBox" style="display:none;margin-bottom:14px"></div>' +
+    '<button class="btn btn-primary btn-block" id="snapBtn" onclick="takeSelfie()" style="display:none"><i class="fa-solid fa-camera"></i> Take Photo</button>' +
+    '<button class="btn btn-success btn-block" id="confirmBtn" style="display:none;margin-top:8px" onclick="confirmSelfie()"><i class="fa-solid fa-check"></i> Confirm &amp; Submit Attendance</button>' +
+    '<button class="btn btn-light btn-block" id="retakeBtn" style="display:none;margin-top:8px" onclick="retakeSelfie()"><i class="fa-solid fa-rotate-left"></i> Retake Photo</button>' +
+    '<button class="btn btn-link btn-block small muted" id="skipSelfieBtn" style="display:none;margin-top:8px;font-size:12px;color:var(--muted);text-decoration:underline" onclick="skipSelfie()">Camera not working? Proceed without photo</button>' +
     '</div>';
 
-  navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } })
-    .then(function(stream) {
-      selfieStream = stream;
-      document.getElementById('selfieVideo').srcObject = stream;
-    })
-    .catch(function() {
-      // Camera not available — proceed without selfie
-      alert('Camera not available. Proceeding without selfie.');
-      doFinalMark();
-    });
+  startSelfieStream('user');
+}
+
+function startSelfieStream(facingMode) {
+  if (selfieStream) {
+    try { selfieStream.getTracks().forEach(function(t) { t.stop(); }); } catch(e){}
+    selfieStream = null;
+  }
+
+  currentFacingMode = facingMode || 'user';
+  var video = document.getElementById('selfieVideo');
+  var badge = document.getElementById('camModeTitle');
+  var loader = document.getElementById('videoLoader');
+  if (loader) loader.style.display = 'flex';
+
+  if (badge) {
+    badge.innerHTML = (currentFacingMode === 'user')
+      ? '<i class="fa-solid fa-user"></i> Front Camera Active'
+      : '<i class="fa-solid fa-camera"></i> Back Camera Active';
+  }
+  if (video) {
+    video.style.transform = (currentFacingMode === 'user') ? 'scaleX(-1)' : 'none';
+  }
+
+  var constraintsList = [
+    { video: { facingMode: { ideal: currentFacingMode }, width: { ideal: 640 }, height: { ideal: 640 } }, audio: false },
+    { video: { facingMode: currentFacingMode }, audio: false },
+    { video: true, audio: false }
+  ];
+
+  function tryConstraintIndex(idx) {
+    if (idx >= constraintsList.length) {
+      handleCameraFailure('Direct camera preview is unavailable on this device/browser. Tap below to open your camera and take a selfie:');
+      return;
+    }
+
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      navigator.mediaDevices.getUserMedia(constraintsList[idx])
+        .then(function(stream) {
+          onStreamReady(stream);
+        })
+        .catch(function(err) {
+          console.warn('getUserMedia constraint (' + idx + ') failed:', err);
+          tryConstraintIndex(idx + 1);
+        });
+    } else {
+      var legacyGUM = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia;
+      if (legacyGUM) {
+        legacyGUM.call(navigator, constraintsList[idx], function(stream) {
+          onStreamReady(stream);
+        }, function(err) {
+          tryConstraintIndex(idx + 1);
+        });
+      } else {
+        handleCameraFailure('Camera live streaming is not supported on this browser or connection. Tap below to open front camera:');
+      }
+    }
+  }
+
+  tryConstraintIndex(0);
+}
+
+function onStreamReady(stream) {
+  selfieStream = stream;
+  var video = document.getElementById('selfieVideo');
+  var loader = document.getElementById('videoLoader');
+  if (video) {
+    video.srcObject = stream;
+    video.setAttribute('playsinline', 'true');
+    video.setAttribute('muted', 'true');
+    video.muted = true;
+    var playPromise = video.play();
+    if (playPromise !== undefined) {
+      playPromise.then(function() {
+        if (loader) loader.style.display = 'none';
+      }).catch(function(e) {
+        console.warn('Play error:', e);
+        if (loader) loader.style.display = 'none';
+      });
+    } else {
+      if (loader) loader.style.display = 'none';
+    }
+  }
+  var snapBtn = document.getElementById('snapBtn');
+  if (snapBtn) snapBtn.style.display = 'block';
+  var skipBtn = document.getElementById('skipSelfieBtn');
+  if (skipBtn) skipBtn.style.display = 'block';
+}
+
+function handleCameraFailure(msg) {
+  var loader = document.getElementById('videoLoader');
+  if (loader) loader.style.display = 'none';
+  var video = document.getElementById('selfieVideo');
+  if (video) video.style.display = 'none';
+  var switchBtn = document.getElementById('switchCamBtn');
+  if (switchBtn) switchBtn.style.display = 'none';
+  var snapBtn = document.getElementById('snapBtn');
+  if (snapBtn) snapBtn.style.display = 'none';
+
+  var badge = document.getElementById('camModeTitle');
+  if (badge) {
+    badge.className = 'badge badge-amber';
+    badge.innerHTML = '<i class="fa-solid fa-camera"></i> Camera Mode: Manual Capture';
+  }
+
+  var fbBox = document.getElementById('camFallbackBox');
+  if (fbBox) {
+    fbBox.style.display = 'block';
+    fbBox.innerHTML =
+      '<p class="small muted" style="margin:0 0 10px">' + msg + '</p>' +
+      '<label class="btn btn-primary btn-block" style="cursor:pointer;padding:14px;font-size:15px">' +
+      '<i class="fa-solid fa-camera"></i> Open Front Camera &amp; Take Photo' +
+      '<input type="file" id="selfieFileInput" accept="image/*" capture="user" style="display:none" onchange="handleSelfieFile(this)">' +
+      '</label>';
+  }
+
+  var skipBtn = document.getElementById('skipSelfieBtn');
+  if (skipBtn) skipBtn.style.display = 'block';
+}
+
+function switchCamera() {
+  var nextMode = (currentFacingMode === 'user') ? 'environment' : 'user';
+  startSelfieStream(nextMode);
+}
+
+function handleSelfieFile(input) {
+  if (!input.files || !input.files[0]) return;
+  var file = input.files[0];
+  showLoader(true);
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var img = new Image();
+    img.onload = function() {
+      showLoader(false);
+      var canvas = document.getElementById('selfieCanvas');
+      var maxDim = 480;
+      var w = img.width, h = img.height;
+      if (w > h) {
+        if (w > maxDim) { h = Math.round(h * maxDim / w); w = maxDim; }
+      } else {
+        if (h > maxDim) { w = Math.round(w * maxDim / h); h = maxDim; }
+      }
+      canvas.width = w; canvas.height = h;
+      var ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      pendingSelfie = canvas.toDataURL('image/jpeg', 0.75);
+
+      var preview = document.getElementById('selfiePreview');
+      preview.src = pendingSelfie;
+      preview.style.display = 'block';
+
+      var video = document.getElementById('selfieVideo');
+      if (video) video.style.display = 'none';
+      var loader = document.getElementById('videoLoader');
+      if (loader) loader.style.display = 'none';
+
+      var snapBtn = document.getElementById('snapBtn');
+      if (snapBtn) snapBtn.style.display = 'none';
+      var fbBox = document.getElementById('camFallbackBox');
+      if (fbBox) fbBox.style.display = 'none';
+      var switchBtn = document.getElementById('switchCamBtn');
+      if (switchBtn) switchBtn.style.display = 'none';
+
+      document.getElementById('confirmBtn').style.display = 'block';
+      document.getElementById('retakeBtn').style.display = 'block';
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
 }
 
 function takeSelfie() {
   var video = document.getElementById('selfieVideo');
   var canvas = document.getElementById('selfieCanvas');
-  canvas.width = 480; canvas.height = 480;
+  if (!video || !video.videoWidth) {
+    alert('Camera is still starting. Please wait 1 second and try again.');
+    return;
+  }
+  var vw = video.videoWidth;
+  var vh = video.videoHeight;
+  var size = Math.min(vw, vh);
+  var sx = (vw - size) / 2;
+  var sy = (vh - size) / 2;
+
+  canvas.width = 480;
+  canvas.height = 480;
   var ctx = canvas.getContext('2d');
-  ctx.drawImage(video, 0, 0, 480, 480);
-  pendingSelfie = canvas.toDataURL('image/jpeg', 0.7);
-  document.getElementById('selfiePreview').src = pendingSelfie;
-  document.getElementById('selfiePreview').style.display = 'block';
-  document.getElementById('selfieVideo').style.display = 'none';
+
+  if (currentFacingMode === 'user') {
+    ctx.save();
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, sx, sy, size, size, 0, 0, canvas.width, canvas.height);
+    ctx.restore();
+  } else {
+    ctx.drawImage(video, sx, sy, size, size, 0, 0, canvas.width, canvas.height);
+  }
+
+  pendingSelfie = canvas.toDataURL('image/jpeg', 0.75);
+  var preview = document.getElementById('selfiePreview');
+  preview.src = pendingSelfie;
+  preview.style.display = 'block';
+  video.style.display = 'none';
+
   document.getElementById('snapBtn').style.display = 'none';
-  document.getElementById('confirmBtn').style.display = '';
+  var switchBtn = document.getElementById('switchCamBtn');
+  if (switchBtn) switchBtn.style.display = 'none';
+  document.getElementById('confirmBtn').style.display = 'block';
+  document.getElementById('retakeBtn').style.display = 'block';
 }
 
 function retakeSelfie() {
-  document.getElementById('selfiePreview').style.display = 'none';
-  document.getElementById('selfieVideo').style.display = 'block';
-  document.getElementById('snapBtn').style.display = '';
+  pendingSelfie = null;
+  var preview = document.getElementById('selfiePreview');
+  preview.style.display = 'none';
+  preview.src = '';
+
+  var video = document.getElementById('selfieVideo');
+  if (selfieStream && selfieStream.active) {
+    video.style.display = 'block';
+    var snapBtn = document.getElementById('snapBtn');
+    if (snapBtn) snapBtn.style.display = 'block';
+    var switchBtn = document.getElementById('switchCamBtn');
+    if (switchBtn) switchBtn.style.display = 'inline-flex';
+  } else {
+    video.style.display = 'block';
+    startSelfieStream(currentFacingMode);
+  }
+
+  var fbBox = document.getElementById('camFallbackBox');
+  if (fbBox && (!selfieStream || !selfieStream.active)) {
+    fbBox.style.display = 'block';
+  }
+
   document.getElementById('confirmBtn').style.display = 'none';
+  document.getElementById('retakeBtn').style.display = 'none';
+}
+
+function skipSelfie() {
+  pendingSelfie = null;
+  if (selfieStream) {
+    try { selfieStream.getTracks().forEach(function(t) { t.stop(); }); } catch(e){}
+    selfieStream = null;
+  }
+  doFinalMark();
 }
 
 function confirmSelfie() {
-  if (selfieStream) { selfieStream.getTracks().forEach(function(t){ t.stop(); }); }
+  if (selfieStream) {
+    try { selfieStream.getTracks().forEach(function(t) { t.stop(); }); } catch(e){}
+    selfieStream = null;
+  }
   doFinalMark();
 }
 
 function doFinalMark() {
-  if (selfieStream) { selfieStream.getTracks().forEach(function(t){ t.stop(); }); }
+  if (selfieStream) {
+    try { selfieStream.getTracks().forEach(function(t) { t.stop(); }); } catch(e){}
+    selfieStream = null;
+  }
   showLoader(true);
   var body = 'action=mark&code=' + encodeURIComponent(pendingCode) + '&location=' + encodeURIComponent(pendingLocation);
   if (pendingSelfie) body += '&selfie=' + encodeURIComponent(pendingSelfie);
