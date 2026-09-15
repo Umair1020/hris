@@ -91,10 +91,19 @@ if ($action === 'lookup') {
         }
     }
 
+    // --- PHOTO IS MANDATORY: no photo → no attendance ---
+    $selfieRequired = get_setting('att_selfie_required', '1') === '1';
+    if ($selfieRequired && (!$selfieData || strpos($selfieData, 'data:image') !== 0)) {
+        json_response(['ok' => false, 'error' => '📸 Photo required. Attendance cannot be marked without a live selfie — please take your photo and try again.']);
+    }
+
     // --- SAVE SELFIE ---
     $selfieFile = null;
     if ($selfieData && strpos($selfieData, 'data:image') === 0) {
         $selfieFile = saveSelfie($selfieData, $emp['employee_code'] . '_' . $selfieType);
+        if (!$selfieFile) {
+            json_response(['ok' => false, 'error' => '📸 Your photo could not be saved. Please retake the selfie and submit again.']);
+        }
     }
 
     if (!$att || !$att['clock_in']) {

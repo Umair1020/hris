@@ -23,6 +23,12 @@ if ($selfieData && strpos($selfieData, 'data:image') === 0) {
     $selfieFile = save_selfie_image($selfieData, $prefix);
 }
 
+// PHOTO IS MANDATORY: without a live selfie we send the employee to the camera page
+$selfieRequired = get_setting('att_selfie_required', '1') === '1';
+if ($selfieRequired && !$selfieFile && ($action === 'in' || $action === 'out')) {
+    redirect(APP_URL . 'modules/attendance/mark.php?auto=1');
+}
+
 $existing = fetch_one("SELECT * FROM attendance WHERE employee_id=? AND attendance_date=?", [$empId, $today]);
 
 if ($action === 'in') {
