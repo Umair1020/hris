@@ -24,13 +24,7 @@ function calculateDistance($lat1, $lng1, $lat2, $lng2)
 // --- Helper: save base64 selfie to file ---
 function saveSelfie($base64, $prefix)
 {
-    $dir = UPLOAD_DIR . 'selfies/';
-    if (!is_dir($dir)) mkdir($dir, 0755, true);
-    $data = base64_decode(preg_replace('#^data:image/\w+;base64,#i', '', $base64));
-    if (!$data) return null;
-    $filename = $prefix . '_' . date('Ymd_His') . '.jpg';
-    file_put_contents($dir . $filename, $data);
-    return 'selfies/' . $filename;
+    return save_selfie_image($base64, $prefix);
 }
 
 $action = $_REQUEST['action'] ?? '';

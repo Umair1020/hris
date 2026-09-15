@@ -12,8 +12,16 @@ verify_csrf();
 $empId  = current_employee_id();
 $action = $_POST['action'] ?? '';       // in | out
 $location = clean($_POST['location'] ?? '');
+$selfieData = $_POST['selfie'] ?? '';
 $today  = today();
 $now    = now();
+
+$selfieFile = null;
+if ($selfieData && strpos($selfieData, 'data:image') === 0) {
+    $empCodeRow = fetch_one("SELECT employee_code FROM employees WHERE id=?", [$empId]);
+    $prefix = ($empCodeRow ? $empCodeRow['employee_code'] : 'emp') . '_' . $action;
+    $selfieFile = save_selfie_image($selfieData, $prefix);
+}
 
 $existing = fetch_one("SELECT * FROM attendance WHERE employee_id=? AND attendance_date=?", [$empId, $today]);
 
@@ -27,14 +35,15 @@ if ($action === 'in') {
         if ($location && $location !== 'location-unavailable' && strpos($location, ',') !== false) {
             $mapsLink = "https://maps.google.com/?q=$location";
         }
+        $inData = ['clock_in' => $now, 'clock_in_location' => $mapsLink ?: $location, 'clock_in_method' => 'portal', 'status' => $late];
+        if ($selfieFile) $inData['clock_in_selfie'] = $selfieFile;
+
         if ($existing) {
-            update('attendance', ['clock_in' => $now, 'clock_in_location' => $mapsLink ?: $location, 'clock_in_method' => 'portal', 'status' => $late], 'id = ?', [$existing['id']]);
+            update('attendance', $inData, 'id = ?', [$existing['id']]);
         } else {
-            insert('attendance', [
-                'employee_id' => $empId, 'attendance_date' => $today,
-                'clock_in' => $now, 'clock_in_location' => $mapsLink ?: $location,
-                'clock_in_method' => 'portal', 'status' => $late,
-            ]);
+            $inData['employee_id'] = $empId;
+            $inData['attendance_date'] = $today;
+            insert('attendance', $inData);
         }
         log_activity('Clock In', "Location: $location");
 
@@ -76,10 +85,13 @@ if ($action === 'in') {
             $mapsLink = "https://maps.google.com/?q=$location";
         }
 
-        update('attendance', [
+        $outData = [
             'clock_out' => $now, 'clock_out_location' => $mapsLink ?: $location,
             'work_hours' => $hours, 'overtime_hours' => $overtime, 'undertime_hours' => $undertime,
-        ], 'id = ?', [$existing['id']]);
+        ];
+        if ($selfieFile) $outData['clock_out_selfie'] = $selfieFile;
+
+        update('attendance', $outData, 'id = ?', [$existing['id']]);
         log_activity('Clock Out', "Worked $hours hrs, OT $overtime");
 
         // Send WhatsApp confirmation
