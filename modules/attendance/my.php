@@ -115,14 +115,14 @@ foreach ($records as $r) $recMap[$r['attendance_date']] = $r;
   <div class="modal">
     <div class="modal-head"><h3><i class="fa-solid fa-fingerprint"></i> Mark Attendance</h3><i class="fa-solid fa-xmark" style="cursor:pointer" onclick="closeModal('clockModal')"></i></div>
     <div class="modal-body">
-      <div class="clock-widget"><div class="time" data-clock></div><div class="date"><?= date('l, d F Y') ?></div><p class="small" style="opacity:.8">Location is captured to confirm your arrival</p></div>
+      <div class="clock-widget"><div class="time" data-clock></div><div class="date"><?= date('l, d F Y') ?></div><p class="small" style="opacity:.8">Location + front camera selfie are required (photo is mandatory)</p></div>
       <form method="post" action="<?= url('modules/attendance/clock.php') ?>" id="clockForm" style="margin-top:18px">
         <?= csrf_field() ?>
         <input type="hidden" name="action" id="clockAction">
         <input type="hidden" name="location" id="clockLoc">
         <div class="flex gap">
-          <button type="button" class="btn btn-primary btn-block" onclick="doClock('in')"><i class="fa-solid fa-right-to-bracket"></i> Clock IN</button>
-          <button type="button" class="btn btn-dark btn-block" onclick="doClock('out')"><i class="fa-solid fa-right-from-bracket"></i> Clock OUT</button>
+          <a href="<?= url('modules/attendance/mark.php?auto=1') ?>" class="btn btn-primary btn-block"><i class="fa-solid fa-right-to-bracket"></i> Clock IN</a>
+          <a href="<?= url('modules/attendance/mark.php?auto=1') ?>" class="btn btn-dark btn-block"><i class="fa-solid fa-right-from-bracket"></i> Clock OUT</a>
         </div>
       </form>
     </div>

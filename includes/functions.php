@@ -476,15 +476,36 @@ function save_setting($key, $value)
 
 /**
  * Save base64 selfie data to file in assets/uploads/selfies/
+ * Returns the relative path, or NULL when the photo is missing / not a real image.
  */
 function save_selfie_image($base64, $prefix = 'selfie')
 {
+    $base64 = (string)$base64;
+    if (strpos($base64, 'data:image') !== 0) return null;
+
+    $raw = preg_replace('#^data:image/\w+;base64,#i', '', $base64);
+    if (strlen($raw) > 12 * 1024 * 1024) return null;          // ~9 MB decoded cap
+    $data = base64_decode($raw, true);
+    if ($data === false || strlen($data) < 1024) return null;   // too small → not a photo
+
+    // Make sure the payload really is an image (rejects junk / tampered data)
+    $info = @getimagesizefromstring($data);
+    if (!$info || empty($info[0]) || empty($info[1])) return null;
+
     $dir = UPLOAD_DIR . 'selfies/';
     if (!is_dir($dir)) mkdir($dir, 0755, true);
-    $data = base64_decode(preg_replace('#^data:image/\w+;base64,#i', '', $base64));
-    if (!$data) return null;
-    $filename = $prefix . '_' . date('Ymd_His') . '.jpg';
-    file_put_contents($dir . $filename, $data);
+
+    // Safe, unique file name
+    $safe = preg_replace('/[^A-Za-z0-9_-]/', '', (string)$prefix);
+    if ($safe === '') $safe = 'selfie';
+    try {
+        $rand = bin2hex(random_bytes(4));
+    } catch (Exception $e) {
+        $rand = uniqid();
+    }
+    $filename = $safe . '_' . date('Ymd_His') . '_' . $rand . '.jpg';
+
+    if (file_put_contents($dir . $filename, $data) === false) return null;
     return 'selfies/' . $filename;
 }
 

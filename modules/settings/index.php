@@ -267,7 +267,7 @@ $cronUrl = APP_URL . 'cron/reminders.php?key=' . $cronKey;
 
   <div class="card card-pad" style="margin-top:18px">
   <h3 class="section-title" style="margin-bottom:14px"><i class="fa-solid fa-shield-halved" style="color:#F26223"></i> Attendance Security (Anti-Fraud)</h3>
-  <div class="alert alert-info"><i class="fa-solid fa-circle-info"></i> Selfie verification ensures the right person is marking attendance. When enabled, employees must take a photo when clocking in/out. HR can view these photos in the attendance log.</div>
+  <div class="alert alert-info"><i class="fa-solid fa-circle-info"></i> Selfie verification ensures the right person is marking attendance. When enabled, the front camera opens automatically and attendance <strong>cannot be marked without a photo</strong> — clock in/out is only saved together with the selfie. HR can view these photos in the attendance log.</div>
   <form method="post">
     <?= csrf_field() ?>
     <input type="hidden" name="section" value="attendance">
@@ -275,7 +275,7 @@ $cronUrl = APP_URL . 'cron/reminders.php?key=' . $cronKey;
       <div class="flex between center">
         <div>
           <h3 class="section-title" style="margin:0"><i class="fa-solid fa-camera"></i> Selfie Verification</h3>
-          <p class="muted small" style="margin:6px 0 0">Employee must take a selfie photo when marking attendance. The photo is saved and visible to HR. Works from any location (office, customer sites, remote).</p>
+          <p class="muted small" style="margin:6px 0 0">Employee must take a selfie photo when marking attendance — the front camera opens automatically and <strong>no attendance is marked without the photo</strong>. The photo is saved and visible to HR. Works from any location (office, customer sites, remote).</p>
         </div>
         <label class="flex center gap" style="gap:8px;cursor:pointer">
           <input type="checkbox" name="att_selfie_required" <?= $attSelfie ? 'checked' : '' ?> style="width:20px;height:20px">
