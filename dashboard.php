@@ -14,8 +14,9 @@ $month = (int)date('m'); $year = (int)date('Y');
 
 /* ---- stats by role ---- */
 if (is_hr()) {
+    att_sync_absents();
     $totalEmployees = (int)fetch_one("SELECT COUNT(*) c FROM employees WHERE status='Active'")['c'];
-    $presentToday   = (int)fetch_one("SELECT COUNT(*) c FROM attendance WHERE attendance_date=? AND status IN ('present','late')", [$today])['c'];
+    $presentToday   = (int)fetch_one("SELECT COUNT(*) c FROM attendance WHERE attendance_date=? AND status IN (" . att_sql_in(att_present_statuses()) . ")", [$today])['c'];
     $pendingLeaves  = (int)fetch_one("SELECT COUNT(*) c FROM leave_requests WHERE status='pending'")['c'];
     $openJobs       = (int)fetch_one("SELECT COUNT(*) c FROM job_postings WHERE status='open'")['c'];
     $newApplicants  = (int)fetch_one("SELECT COUNT(*) c FROM applicants WHERE status='new'")['c'];
@@ -25,7 +26,7 @@ if (is_hr()) {
     $teamIds = array_column($myTeam, 'id') ?: [0];
     $in = implode(',', array_fill(0, count($teamIds), '?'));
     $totalEmployees = count($teamIds);
-    $presentToday   = (int)fetch_one("SELECT COUNT(*) c FROM attendance WHERE attendance_date=? AND employee_id IN($in) AND status IN ('present','late')", array_merge([$today], $teamIds))['c'];
+    $presentToday   = (int)fetch_one("SELECT COUNT(*) c FROM attendance WHERE attendance_date=? AND employee_id IN($in) AND status IN (" . att_sql_in(att_present_statuses()) . ")", array_merge([$today], $teamIds))['c'];
     $pendingLeaves  = (int)fetch_one("SELECT COUNT(*) c FROM leave_requests WHERE status='pending' AND employee_id IN($in)", $teamIds)['c'];
     $openJobs = 0; $newApplicants = 0;
     $pendingReviews = (int)fetch_one("SELECT COUNT(*) c FROM performance_reviews pr JOIN employees e ON e.id=pr.employee_id WHERE e.manager_id=? AND pr.status='submitted'", [$empId])['c'];
@@ -43,7 +44,7 @@ if (is_hr()) {
 if (is_hr()) {
     $trend = fetch_all(
         "SELECT attendance_date d,
-                SUM(CASE WHEN status IN('present','late') THEN 1 ELSE 0 END) present,
+                SUM(CASE WHEN status IN(" . att_sql_in(att_present_statuses()) . ") THEN 1 ELSE 0 END) present,
                 SUM(CASE WHEN status='absent' THEN 1 ELSE 0 END) absent
          FROM attendance
          WHERE attendance_date >= " . sql_days_ago(6) . "
@@ -172,7 +173,7 @@ $activities = fetch_all("SELECT * FROM activity_log ORDER BY id DESC LIMIT 8");
           <div class="avatar sm"><?= e(initials($t['full_name'])) ?></div>
           <div><div class="bold small"><?= e($t['full_name']) ?></div><div class="muted small"><?= e($t['designation']) ?></div></div>
         </div>
-        <span class="badge badge-<?= $t['astatus']?($t['astatus']==='present'?'green':($t['astatus']==='late'?'amber':'gray')):'gray' ?>"><?= $t['astatus']?ucfirst($t['astatus']):'Not marked' ?></span>
+        <?= $t['astatus'] ? att_badge(['status'=>$t['astatus']], false) : '<span class="badge badge-gray">Not marked</span>' ?>
       </div>
     <?php endforeach; if(!$team) echo '<div class="empty"><i class="fa-solid fa-users-slash"></i>No team members assigned</div>'; ?>
   </div>

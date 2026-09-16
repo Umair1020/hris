@@ -72,6 +72,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         save_setting('ot_to_compleave_hours', clean($_POST['ot_to_compleave_hours']));
         save_setting('ot_against_late', isset($_POST['ot_against_late']) ? '1' : '0');
         save_setting('regularize_monthly_limit', clean($_POST['regularize_monthly_limit']));
+        save_setting('undertime_grace_minutes', (string)max(0, (int)($_POST['undertime_grace_minutes'] ?? 10)));
+        save_setting('auto_absent_enabled', isset($_POST['auto_absent_enabled']) ? '1' : '0');
+        save_setting('saturday_off', isset($_POST['saturday_off']) ? '1' : '0');
         log_activity('Settings Updated', 'Attendance policy');
         set_flash('success', '✅ Attendance & Reminder settings saved!');
 
@@ -121,6 +124,9 @@ $reqHours = get_setting('required_work_hours', '9');
 $otToComp = get_setting('ot_to_compleave_hours', '24');
 $otAgainstLate = get_setting('ot_against_late', '1') === '1';
 $regLimit = get_setting('regularize_monthly_limit', '1');
+$utGrace = get_setting('undertime_grace_minutes', '10');
+$autoAbsent = get_setting('auto_absent_enabled', '1') === '1';
+$satOff = get_setting('saturday_off', '0') === '1';
 $rCheckinEnabled = get_setting('reminder_checkin_enabled', '1') === '1';
 $rCheckinTime = get_setting('reminder_checkin_time', '10:30');
 $rCheckoutEnabled = get_setting('reminder_checkout_enabled', '1') === '1';
@@ -295,9 +301,18 @@ $cronUrl = APP_URL . 'cron/reminders.php?key=' . $cronKey;
       <div><label>Late Grace Period (minutes)</label><input type="number" name="late_grace_minutes" class="form-control" value="<?= e($lateGrace) ?>"><div class="muted small">After this many minutes, clock-in is marked Late</div></div>
       <div><label>Late Deduction Threshold</label><input type="number" name="late_threshold_count" class="form-control" value="<?= e($lateThreshold) ?>"><div class="muted small">Salary deducts after this many lates per month (e.g. 3 = 4th late triggers deduction)</div></div>
       <div><label>Deduction Type</label><select name="late_deduction_type" class="form-select"><option value="half_day" <?= $lateDeduction==='half_day'?'selected':'' ?>>Half Day Salary</option><option value="full_day" <?= $lateDeduction==='full_day'?'selected':'' ?>>Full Day Salary</option><option value="amount" <?= $lateDeduction==='amount'?'selected':'' ?>>Fixed Amount</option></select></div>
-      <div><label>Required Working Hours</label><input type="number" step="0.5" name="required_work_hours" class="form-control" value="<?= e($reqHours) ?>"><div class="muted small">Hours to complete for "Working Hours Completed" status</div></div>
+      <div><label>Required Working Hours</label><input type="number" step="0.5" name="required_work_hours" class="form-control" value="<?= e($reqHours) ?>"><div class="muted small">Fallback only — each employee's required hours = their own shift length (Shift End − Shift Start)</div></div>
       <div><label>OT → Comp Leave Threshold (hours)</label><input type="number" step="0.5" name="ot_to_compleave_hours" class="form-control" value="<?= e($otToComp) ?>"><div class="muted small">e.g. 24 hours OT auto-converts to 1 Comp Leave</div></div>
       <div><label>Regularization Limit (per month)</label><input type="number" name="regularize_monthly_limit" class="form-control" value="<?= e($regLimit) ?>"><div class="muted small">How many times HR can regularize an employee's attendance per month</div></div>
+      <div><label>Undertime Tolerance (minutes)</label><input type="number" name="undertime_grace_minutes" class="form-control" value="<?= e($utGrace) ?>"><div class="muted small">If the shortfall is within this many minutes, the day still counts as "Hours Completed" (no Undertime)</div></div>
+    </div>
+    <div class="flex between center" style="margin-top:12px;padding:12px;background:#f4f0f8;border-radius:10px">
+      <div><strong>Auto-mark Absent</strong><div class="muted small">Past working days with no attendance are automatically marked Absent (weekly off days and public holidays are skipped)</div></div>
+      <label class="flex center gap" style="gap:8px;cursor:pointer"><input type="checkbox" name="auto_absent_enabled" <?= $autoAbsent?'checked':'' ?> style="width:20px;height:20px"><span class="small bold"><?= $autoAbsent?'ON':'OFF' ?></span></label>
+    </div>
+    <div class="flex between center" style="margin-top:8px;padding:12px;background:#f4f0f8;border-radius:10px">
+      <div><strong>Saturday is a company Off Day</strong><div class="muted small">Adds Saturday as an off day for everyone (in addition to each employee's own weekly off)</div></div>
+      <label class="flex center gap" style="gap:8px;cursor:pointer"><input type="checkbox" name="saturday_off" <?= $satOff?'checked':'' ?> style="width:20px;height:20px"><span class="small bold"><?= $satOff?'ON':'OFF' ?></span></label>
     </div>
     <div class="flex between center" style="margin-top:12px;padding:12px;background:#f4f0f8;border-radius:10px">
       <div><strong>OT Compensates Late Arrival</strong><div class="muted small">If employee is late but completes required hours + overtime → mark as "Working Hours Completed"</div></div>

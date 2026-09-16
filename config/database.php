@@ -107,6 +107,9 @@ class Database
             'ot_against_late' => '1',
             'regularize_monthly_limit' => '1',
             'saturday_off' => '0',
+            'auto_absent_enabled' => '1',
+            'absent_sync_days' => '45',
+            'undertime_grace_minutes' => '10',
             'letter_header' => '<div style="text-align:center;margin-bottom:20px"><img src="' . (defined('APP_URL') ? APP_URL : '') . 'assets/img/logo.png" style="height:50px"><br><strong style="font-size:14px">SPOTCOMM GLOBAL</strong><br><span style="font-size:10px;color:#666">Outsource · Optimize · Thrive</span></div>',
             'letter_footer' => '<div style="text-align:center;margin-top:30px;border-top:1px solid #ddd;padding-top:10px;font-size:10px;color:#666"><strong>Spotcomm Global HR Department</strong><br>Phone: +971 557015596 · Email: sales@spotcommglobal.com · Web: www.spotcommglobal.com</div>',
         ];
@@ -127,6 +130,19 @@ class Database
                 'regularized_by' => "INTEGER",
                 'regularized_note' => "TEXT",
                 'undertime_hours' => "REAL DEFAULT 0",
+                'late_minutes' => "INTEGER DEFAULT 0",
+                'notes' => "TEXT",
+            ],
+            'leave_requests' => [
+                'half_day_session' => "TEXT",
+            ],
+            'grievances' => [
+                'assigned_to' => "INTEGER",
+                'resolution_note' => "TEXT",
+                'updated_at' => "TEXT",
+            ],
+            'holidays' => [
+                'is_recurring' => "INTEGER DEFAULT 0",
             ],
             'letter_templates' => [
                 'type' => "TEXT DEFAULT 'letter'",
@@ -135,12 +151,44 @@ class Database
             ],
         ];
         foreach ($columnChecks as $table => $cols) {
+            if (!$this->tableExists($table)) continue;
             $existingCols = $pdo->query("PRAGMA table_info($table)")->fetchAll(PDO::FETCH_COLUMN, 1);
             foreach ($cols as $col => $type) {
                 if (!in_array($col, $existingCols)) {
                     try { $pdo->exec("ALTER TABLE $table ADD COLUMN $col $type"); } catch (Exception $e) {}
                 }
             }
+        }
+
+        // 3b. Ensure holidays table exists (Public Holidays)
+        if (!$this->tableExists('holidays')) {
+            $pdo->exec("CREATE TABLE IF NOT EXISTS holidays (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT,
+                holiday_date TEXT UNIQUE,
+                is_recurring INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )");
+        }
+        // 3c. Ensure grievances table exists (HR complaint desk)
+        if (!$this->tableExists('grievances')) {
+            $pdo->exec("CREATE TABLE IF NOT EXISTS grievances (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                employee_id INTEGER,
+                category TEXT,
+                subject TEXT,
+                description TEXT,
+                priority TEXT DEFAULT 'normal',
+                status TEXT DEFAULT 'open',
+                is_anonymous INTEGER DEFAULT 0,
+                admin_response TEXT,
+                responded_by INTEGER,
+                responded_at TEXT,
+                assigned_to INTEGER,
+                resolution_note TEXT,
+                updated_at TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )");
         }
 
         // 4. Ensure attendance_reminders table exists

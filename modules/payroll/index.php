@@ -30,7 +30,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
         // build items for all active employees
         $emps = fetch_all("SELECT * FROM employees WHERE status='Active'");
         foreach ($emps as $e) {
-            $att = fetch_one("SELECT SUM(CASE WHEN status IN('present','late') THEN 1 ELSE 0 END) present, SUM(CASE WHEN status='absent' THEN 1 ELSE 0 END) absent, SUM(CASE WHEN status='half_day' THEN 1 ELSE 0 END) halfday, SUM(overtime_hours) ot
+            $att = fetch_one("SELECT SUM(CASE WHEN status IN(" . att_sql_in(array_diff(att_present_statuses(), ['half_day'])) . ") THEN 1 ELSE 0 END) present, SUM(CASE WHEN status='absent' THEN 1 ELSE 0 END) absent, SUM(CASE WHEN status='half_day' THEN 1 ELSE 0 END) halfday, SUM(overtime_hours) ot
                               FROM attendance WHERE employee_id=? AND " . sql_month('attendance_date') . "=? AND " . sql_year('attendance_date') . "=?",
                              [$e['id'],$month,$year]);
             $present = (float)($att['present']??0) + 0.5*(float)($att['halfday']??0);

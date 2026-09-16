@@ -41,18 +41,25 @@ if (!$emp) {
 }
 
 $today = today();
-$att = fetch_one("SELECT * FROM attendance WHERE employee_id = ? AND attendance_date = ?", [$emp['id'], $today]);
+$now = now();
+// Night-shift aware: an open (not clocked-out) shift from yesterday is still "today's" shift
+$att = att_find_open_shift($emp['id'], $now);
+if (!$att) $att = fetch_one("SELECT * FROM attendance WHERE employee_id = ? AND attendance_date = ?", [$emp['id'], $today]);
 
 if ($action === 'lookup') {
     // Determine what action is available
     if (!$att || !$att['clock_in']) {
+        if ($att && !att_can_clock_in($att)) {
+            json_response(['ok' => true, 'completed' => true, 'name' => $emp['full_name'], 'message' => 'Today is marked as ' . att_label($att['status']) . '. No clock-in needed.']);
+        }
         $nextAction = 'in';
-        $statusText = 'Not Clocked In Yet';
+        $statusText = 'Not Clocked In Yet · Shift ' . date('h:i A', strtotime(att_shift_start($emp)));
     } elseif ($att['clock_in'] && !$att['clock_out']) {
         $nextAction = 'out';
         $statusText = 'Clocked In at ' . date('h:i A', strtotime($att['clock_in']));
+        if (!empty($att['late_minutes'])) $statusText .= ' (Late ' . fmt_hours($att['late_minutes'] / 60) . ')';
     } else {
-        json_response(['ok' => true, 'completed' => true, 'name' => $emp['full_name'], 'message' => 'You have already completed attendance today.']);
+        json_response(['ok' => true, 'completed' => true, 'name' => $emp['full_name'], 'message' => 'You have already completed attendance today. Worked ' . fmt_hours($att['work_hours']) . ' · ' . att_label($att['status'])]);
     }
 
     json_response([
@@ -107,26 +114,26 @@ if ($action === 'lookup') {
     }
 
     if (!$att || !$att['clock_in']) {
-        // CLOCK IN — Smart status: On Time / Late (based on employee shift + grace)
-        $graceMin = (int)get_setting('late_grace_minutes', '15');
-        $empShiftStart = $emp['shift_start'] ?: '09:00';
-        $lateAfter = date('H:i', strtotime("$empShiftStart +$graceMin minutes"));
-        $currentTime = date('H:i');
-        $late = ($currentTime > $lateAfter) ? 'late' : 'present';
+        // CLOCK IN — status by employee shift + grace (Late shows minutes late)
+        $ci = att_clock_in_status($emp, $now, $att);
+        $late = $ci['status'];
         $mapsLink = '';
         if ($location && strpos($location, ',') !== false) {
             $mapsLink = "https://maps.google.com/?q=$location";
         }
+        $inData = ['clock_in' => $now, 'clock_in_location' => $mapsLink ?: $location, 'clock_in_method' => 'id_card', 'status' => $late, 'late_minutes' => $ci['late_minutes'], 'clock_in_selfie' => $selfieFile];
         if ($att) {
-            update('attendance', ['clock_in' => $now, 'clock_in_location' => $mapsLink ?: $location, 'clock_in_method' => 'id_card', 'status' => $late, 'clock_in_selfie' => $selfieFile], 'id = ?', [$att['id']]);
+            update('attendance', $inData, 'id = ?', [$att['id']]);
         } else {
-            insert('attendance', ['employee_id' => $empId, 'attendance_date' => $today, 'clock_in' => $now, 'clock_in_location' => $mapsLink ?: $location, 'clock_in_method' => 'id_card', 'status' => $late, 'clock_in_selfie' => $selfieFile]);
+            $inData['employee_id'] = $empId; $inData['attendance_date'] = $today;
+            insert('attendance', $inData);
         }
         log_activity('QR Clock In', $emp['full_name'] . " at $location");
+        $statusLabel = $late === 'late' ? 'Late by ' . fmt_hours($ci['late_minutes'] / 60) : ($late === 'half_day' ? 'Half Day' . ($ci['late_minutes'] ? ' · Late ' . fmt_hours($ci['late_minutes'] / 60) : '') : 'On Time');
 
         $waSent = false;
         if (!empty($emp['whatsapp'])) {
-            $waMsg = "🔔 *Attendance - Clock IN*\n\n👤 {$emp['full_name']}\n📅 " . date('d M Y, l') . "\n⏰ " . date('h:i A') . "\n📊 " . ucfirst($late);
+            $waMsg = "🔔 *Attendance - Clock IN*\n\n👤 {$emp['full_name']}\n📅 " . date('d M Y, l') . "\n⏰ " . date('h:i A') . "\n📊 " . $statusLabel;
             if ($mapsLink) $waMsg .= "\n📍 $mapsLink";
             $waMsg .= "\n\n_Spotcomm Global HRIS_";
             $r = send_whatsapp($emp['whatsapp'], $waMsg);
@@ -135,35 +142,32 @@ if ($action === 'lookup') {
 
         json_response([
             'ok' => true, 'action' => 'in', 'time' => date('h:i A', strtotime($now)),
-            'status' => $late, 'wa_sent' => $waSent,
-            'message' => "✅ Clocked IN at " . date('h:i A') . " (" . ucfirst($late) . ")"
+            'status' => $late, 'late_minutes' => $ci['late_minutes'], 'wa_sent' => $waSent,
+            'message' => "✅ Clocked IN at " . date('h:i A') . " (" . $statusLabel . ")"
         ]);
 
     } elseif ($att['clock_in'] && !$att['clock_out']) {
-        // CLOCK OUT — Smart re-evaluation of status
-        $hours = calc_hours($att['clock_in'], $now);
-        $reqHours = get_required_hours($emp);
-        $overtime = max(0, round($hours - $reqHours, 2));
-        $undertime = max(0, round($reqHours - $hours, 2));
+        // CLOCK OUT — hours / OT / undertime / final status from the shared engine
+        $calc = att_compute_clock_out($emp, $att, $now);
+        $hours = $calc['work_hours']; $overtime = $calc['overtime_hours']; $undertime = $calc['undertime_hours'];
         $mapsLink = '';
-
-        // Smart: if employee was late but completed required hours → "Working Hours Completed"
-        $newStatus = $att['status'];
-        if ($att['status'] === 'late' && $hours >= $reqHours && get_setting('ot_against_late', '1') === '1') {
-            $newStatus = 'hours_completed';
-        } elseif ($att['status'] === 'present' && $hours >= $reqHours) {
-            $newStatus = 'hours_completed';
-        }
         if ($location && strpos($location, ',') !== false) {
             $mapsLink = "https://maps.google.com/?q=$location";
         }
-        update('attendance', ['clock_out' => $now, 'clock_out_location' => $mapsLink ?: $location, 'work_hours' => $hours, 'overtime_hours' => $overtime, 'undertime_hours' => $undertime, 'clock_out_selfie' => $selfieFile, 'status' => $newStatus], 'id = ?', [$att['id']]);
+        update('attendance', [
+            'clock_out' => $now, 'clock_out_location' => $mapsLink ?: $location,
+            'work_hours' => $hours, 'overtime_hours' => $overtime, 'undertime_hours' => $undertime,
+            'late_minutes' => $calc['late_minutes'], 'clock_out_selfie' => $selfieFile, 'status' => $calc['status'],
+        ], 'id = ?', [$att['id']]);
         log_activity('QR Clock Out', $emp['full_name'] . " worked $hours hrs");
+
+        $summary = "Worked " . fmt_hours($hours, false) . " of " . fmt_hours($calc['required_hours']);
+        if ($overtime > 0) $summary .= " · OT " . fmt_hours($overtime);
+        if ($undertime > 0) $summary .= " · Undertime " . fmt_hours($undertime);
 
         $waSent = false;
         if (!empty($emp['whatsapp'])) {
-            $waMsg = "🔔 *Attendance - Clock OUT*\n\n👤 {$emp['full_name']}\n📅 " . date('d M Y, l') . "\n⏰ " . date('h:i A') . "\n⏱️ Hours: {$hours}";
-            if ($overtime > 0) $waMsg .= "\n⭐ OT: {$overtime}h";
+            $waMsg = "🔔 *Attendance - Clock OUT*\n\n👤 {$emp['full_name']}\n📅 " . date('d M Y, l') . "\n⏰ " . date('h:i A') . "\n⏱️ " . $summary . "\n📊 " . att_label($calc['status']);
             $waMsg .= "\n\n_Spotcomm Global HRIS_";
             $r = send_whatsapp($emp['whatsapp'], $waMsg);
             $waSent = $r['ok'];
@@ -171,8 +175,8 @@ if ($action === 'lookup') {
 
         json_response([
             'ok' => true, 'action' => 'out', 'time' => date('h:i A', strtotime($now)),
-            'hours' => $hours, 'overtime' => $overtime, 'wa_sent' => $waSent,
-            'message' => "✅ Clocked OUT at " . date('h:i A') . ". Total: {$hours}h"
+            'hours' => $hours, 'overtime' => $overtime, 'undertime' => $undertime, 'status' => $calc['status'], 'wa_sent' => $waSent,
+            'message' => "✅ Clocked OUT at " . date('h:i A') . ". " . $summary . " — " . att_label($calc['status'])
         ]);
 
     } else {
