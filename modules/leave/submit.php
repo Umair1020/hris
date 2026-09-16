@@ -13,18 +13,27 @@ $typeId = (int)$_POST['leave_type_id'];
 $start = clean($_POST['start_date']);
 $end = clean($_POST['end_date']);
 $halfDay = (int)($_POST['half_day'] ?? 0);
+$halfSession = in_array($_POST['half_day_session'] ?? '', ['first_half', 'second_half']) ? $_POST['half_day_session'] : 'first_half';
 $reason = clean($_POST['reason']);
 $isEmergency = (int)($_POST['is_emergency'] ?? 0);
 
 $lt = fetch_one("SELECT * FROM leave_types WHERE id=?", [$typeId]);
 if (!$lt) { set_flash('danger','Invalid leave type.'); redirect(APP_URL.'modules/leave/my.php'); }
 
-// compute days (excluding weekends)
-$days = 0;
-try { $period = new DatePeriod(new DateTime($start), new DateInterval('P1D'), (new DateTime($end))->modify('+1 day'));
-} catch (Exception $e) { set_flash('danger','Invalid date range.'); redirect(APP_URL.'modules/leave/my.php'); }
-foreach ($period as $dt) { $dow = (int)$dt->format('N'); if ($dow <= 5) $days++; }
-if ($halfDay) $days = max(0.5, $days - 0.5);
+if (!$start || !$end || strtotime($start) === false || strtotime($end) === false) { set_flash('danger','Invalid date range.'); redirect(APP_URL.'modules/leave/my.php'); }
+// Half day is always a single date
+if ($halfDay) $end = $start;
+if ($end < $start) { set_flash('danger','End date cannot be before start date.'); redirect(APP_URL.'modules/leave/my.php'); }
+
+// overlap check with existing pending/approved requests
+$overlap = fetch_one("SELECT id FROM leave_requests WHERE employee_id=? AND status IN ('pending','approved') AND start_date <= ? AND end_date >= ?", [$empId, $end, $start]);
+if ($overlap) { set_flash('danger','You already have a leave request covering these dates.'); redirect(APP_URL.'modules/leave/my.php'); }
+
+// compute days — only working days (skips weekly off + public holidays)
+$empRow = fetch_one("SELECT * FROM employees WHERE id=?", [$empId]);
+$days = att_working_days($empRow, $start, $end);
+if ($days <= 0) { set_flash('danger','Selected date(s) fall on your off day / public holiday — no leave needed.'); redirect(APP_URL.'modules/leave/my.php'); }
+if ($halfDay) $days = 0.5;
 
 // emergency bypasses lead-day check
 if (!$isEmergency) {
@@ -59,19 +68,23 @@ $status    = 'pending';
 
 insert('leave_requests', [
     'employee_id'=>$empId, 'leave_type_id'=>$typeId,
-    'start_date'=>$start, 'end_date'=>$end, 'days'=>$days, 'half_day'=>$halfDay,
+    'start_date'=>$start, 'end_date'=>$end, 'days'=>$days, 'half_day'=>$halfDay, 'half_day_session'=>$halfDay ? $halfSession : null,
     'reason'=>$reason, 'is_emergency'=>$isEmergency,
     'manager_status'=>$mgrStatus, 'hr_status'=>$hrStatus, 'status'=>$status,
     'attachment_path'=>$attach,
 ]);
 
 // notify manager
-$emp = fetch_one("SELECT manager_id, full_name FROM employees WHERE id=?", [$empId]);
+$emp = $empRow;
+$what = $halfDay ? 'a Half Day (' . ($halfSession === 'second_half' ? 'second half' : 'first half') . ", $start)" : "{$days} day(s) of {$lt['name']}";
 if ($emp && $emp['manager_id']) {
-    notify($emp['manager_id'], 'New Leave Request', "{$emp['full_name']} requested {$days} day(s) of {$lt['name']}", 'modules/leave/approvals.php');
+    notify_employee($emp['manager_id'], 'New Leave Request', "{$emp['full_name']} requested $what", 'modules/leave/approvals.php');
+}
+foreach (fetch_all("SELECT id FROM users WHERE role IN('hr','admin') AND status='active'") as $hrU) {
+    notify($hrU['id'], 'New Leave Request', "{$emp['full_name']} requested $what", 'modules/leave/approvals.php');
 }
 notify(current_user_id(), 'Leave Submitted', "Your {$lt['name']} request ({$days} day(s)) is pending approval.", 'modules/leave/my.php');
 log_activity('Leave Requested', "{$lt['name']} $days days ($start to $end)");
 
-set_flash('success', "Leave request submitted! {$days} day(s) of {$lt['name']}. Awaiting approval.");
+set_flash('success', $halfDay ? "Half Day request submitted for " . format_date($start) . " ({$lt['name']}, 0.5 day). Awaiting approval." : "Leave request submitted! {$days} day(s) of {$lt['name']}. Awaiting approval.");
 redirect(APP_URL.'modules/leave/my.php');

@@ -56,7 +56,7 @@ if (is_hr()) {
       ?>
         <tr>
           <td><div class="bold"><?= e($r['full_name']) ?></div><div class="muted small"><?= e($r['employee_code']) ?></div></td>
-          <td><span class="badge" style="background:<?= e($r['color']) ?>20;color:<?= e($r['color']) ?>"><?= e($r['type_name']) ?></span><?php if($r['is_emergency']): ?> <span class="badge badge-red"><i class="fa-solid fa-bolt"></i></span><?php endif; ?></td>
+          <td><span class="badge" style="background:<?= e($r['color']) ?>20;color:<?= e($r['color']) ?>"><?= e($r['type_name']) ?></span><?php if($r['is_emergency']): ?> <span class="badge badge-red"><i class="fa-solid fa-bolt"></i></span><?php endif; ?><?php if($r['half_day']): ?> <span class="badge badge-amber"><i class="fa-solid fa-star-half-stroke"></i> Half Day<?= ($r['half_day_session'] ?? '') === 'second_half' ? ' (2nd half)' : ' (1st half)' ?></span><?php endif; ?></td>
           <td class="small"><?= format_date($r['start_date'],'d M') ?> - <?= format_date($r['end_date'],'d M Y') ?></td>
           <td><?= $r['days'] ?></td>
           <td class="small muted" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><?= e($r['reason']) ?></td>

@@ -19,25 +19,22 @@ if (!$fromDate) $fromDate = today();
 if (!$toDate) $toDate = today();
 
 $empId = (int)($_GET['emp'] ?? 0);
+$statusFilter = clean($_GET['status'] ?? '');
+if ($toDate < $fromDate) { $t = $fromDate; $fromDate = $toDate; $toDate = $t; }
 
-$where = "WHERE a.attendance_date BETWEEN ? AND ?";
-$params = [$fromDate, $toDate];
+att_sync_absents();
 
-if ($empId > 0) {
-    $where .= " AND a.employee_id = ?";
-    $params[] = $empId;
+$empWhere = "e.status='Active'"; $empParams = [];
+if ($empId > 0) { $empWhere .= " AND e.id=?"; $empParams[] = $empId; }
+$employees = fetch_all("SELECT e.*, d.name dept FROM employees e LEFT JOIN departments d ON d.id=e.department_id WHERE $empWhere ORDER BY e.full_name", $empParams);
+$empIds = array_column($employees, 'id');
+$recMap = [];
+if ($empIds) {
+    $in = implode(',', array_fill(0, count($empIds), '?'));
+    foreach (fetch_all("SELECT * FROM attendance WHERE attendance_date BETWEEN ? AND ? AND employee_id IN ($in)", array_merge([$fromDate, $toDate], $empIds)) as $r) {
+        $recMap[$r['employee_id']][$r['attendance_date']] = $r;
+    }
 }
-
-// Fetch records
-$records = fetch_all(
-    "SELECT a.*, e.full_name, e.employee_code, e.designation, d.name dept
-     FROM attendance a
-     JOIN employees e ON e.id = a.employee_id
-     LEFT JOIN departments d ON d.id = e.department_id
-     $where
-     ORDER BY a.attendance_date DESC, e.full_name",
-    $params
-);
 
 // Generate CSV filename
 $filename = 'Attendance_' . $fromDate . '_to_' . $toDate . '.csv';
@@ -55,50 +52,56 @@ fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
 
 // Header row
 fputcsv($output, [
-    'Date',
-    'Employee Code',
-    'Employee Name',
-    'Department',
-    'Designation',
-    'Clock In',
-    'Clock Out',
-    'Work Hours',
-    'Overtime (hrs)',
-    'Undertime (hrs)',
-    'Status',
-    'Location (Clock In)',
-    'Location (Clock Out)',
-    'Method',
-    'Selfie',
-    'Regularized',
-    'Notes'
+    'Date', 'Day', 'Employee Code', 'Employee Name', 'Department', 'Designation', 'Shift',
+    'Clock In', 'Clock Out', 'Late (min)', 'Work Hours', 'Required Hours', 'Overtime (hrs)', 'Undertime (hrs)',
+    'Status', 'Location (Clock In)', 'Location (Clock Out)', 'Method', 'Selfie', 'Regularized', 'Notes'
 ]);
 
-// Data rows
-foreach ($records as $r) {
-    // FIX: Display time exactly as stored (Karachi time), no UTC conversion
-    $clockIn = $r['clock_in'] ? date('h:i A', strtotime($r['clock_in'])) : '—';
-    $clockOut = $r['clock_out'] ? date('h:i A', strtotime($r['clock_out'])) : '—';
-    
-    fputcsv($output, [
-        format_date($r['attendance_date'], 'd M Y'),
-        $r['employee_code'],
-        $r['full_name'],
-        $r['dept'] ?: '—',
-        $r['designation'] ?: '—',
-        $clockIn,
-        $clockOut,
-        $r['work_hours'] ?: '0',
-        $r['overtime_hours'] ?: '0',
-        $r['undertime_hours'] ?: '0',
-        ucfirst(str_replace('_', ' ', $r['status'])),
-        $r['clock_in_location'] ?: '—',
-        $r['clock_out_location'] ?: '—',
-        ucfirst(str_replace('_', ' ', $r['clock_in_method'] ?? '')),
-        !empty($r['clock_in_selfie']) ? 'Yes' : 'No',
-        $r['is_regularized'] ? 'Yes' : 'No',
-        $r['notes'] ?: '—'
-    ]);
+for ($d = $fromDate; $d <= $toDate; $d = date('Y-m-d', strtotime($d . ' +1 day'))) {
+    foreach ($employees as $e) {
+        $r = $recMap[$e['id']][$d] ?? null;
+        $virtual = $r ? null : att_expected_status($e, $d);
+        if (!$r && $virtual === null) continue;
+        $status = $r ? $r['status'] : $virtual;
+        if ($statusFilter) {
+            $group = isset(att_statuses()[$status]) ? att_statuses()[$status][2] : 'pending';
+            $match = match ($statusFilter) {
+                'late' => $status === 'late' || ($r && (int)$r['late_minutes'] > 0),
+                'present' => in_array($status, att_present_statuses()),
+                'leave' => $group === 'leave',
+                'off' => $group === 'off',
+                'undertime' => $r && (float)$r['undertime_hours'] > 0,
+                'overtime' => $r && (float)$r['overtime_hours'] > 0,
+                default => $status === $statusFilter,
+            };
+            if (!$match) continue;
+        }
+        $label = $status === 'not_marked' ? 'Not Marked' : att_label($status);
+        if ($status === 'public_holiday') $label .= ' (' . att_holiday($d) . ')';
+        fputcsv($output, [
+            format_date($d, 'd M Y'),
+            date('D', strtotime($d)),
+            $e['employee_code'],
+            $e['full_name'],
+            $e['dept'] ?: '—',
+            $e['designation'] ?: '—',
+            att_shift_start($e) . ' - ' . substr($e['shift_end'] ?: '18:00', 0, 5),
+            $r && $r['clock_in'] ? date('h:i A', strtotime($r['clock_in'])) : '—',
+            $r && $r['clock_out'] ? date('h:i A', strtotime($r['clock_out'])) . (substr($r['clock_out'],0,10) !== $d ? ' (+1 day)' : '') : '—',
+            $r ? (int)$r['late_minutes'] : 0,
+            $r ? ($r['work_hours'] ?: '0') : '0',
+            get_required_hours($e),
+            $r ? ($r['overtime_hours'] ?: '0') : '0',
+            $r ? ($r['undertime_hours'] ?: '0') : '0',
+            $label,
+            $r ? ($r['clock_in_location'] ?: '—') : '—',
+            $r ? ($r['clock_out_location'] ?: '—') : '—',
+            $r ? ucfirst(str_replace('_', ' ', $r['clock_in_method'] ?? '')) : '—',
+            $r && !empty($r['clock_in_selfie']) ? 'Yes' : 'No',
+            $r && $r['is_regularized'] ? 'Yes' : 'No',
+            $r ? ($r['notes'] ?: '—') : '—',
+        ]);
+    }
 }
 
 fclose($output);

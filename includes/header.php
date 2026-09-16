@@ -28,7 +28,7 @@ function render_sidebar()
             ['My Performance',      'fa-chart-line',       'modules/performance/my.php',     'employee'],
             ['My Letters',          'fa-file-signature',   'modules/letters/my.php',         'employee'],
             ['Request Letter',      'fa-envelope',         'modules/letters/my.php?action=new', 'employee'],
-            ['Grievances',          'fa-shield-halved',    'modules/grievances/',            'employee'],
+            ['Grievances',          'fa-shield-halved',    'modules/grievances/?tab=mine',   'employee'],
         ],
         'Recruitment' => [
             ['Job Postings',        'fa-briefcase',        'modules/ats/jobs.php',           'employee'],
@@ -40,6 +40,7 @@ function render_sidebar()
             ['QR ID Cards',         'fa-qrcode',           'modules/employees/qr-card.php',  'hr'],
             ['Attendance Mgmt',     'fa-clipboard-check',  'modules/attendance/index.php',   'manager'],
             ['Leave Approvals',     'fa-circle-check',     'modules/leave/approvals.php',    'manager'],
+            ['Grievance Desk',      'fa-shield-halved',    'modules/grievances/?tab=desk',   'hr'],
             ['Payroll',             'fa-sack-dollar',      'modules/payroll/index.php',      'hr'],
             ['Loans',               'fa-hand-holding-dollar','modules/payroll/loans.php',    'hr'],
             ['Benefits',            'fa-gift',             'modules/payroll/benefits.php',   'hr'],
@@ -92,7 +93,16 @@ function is_active($link)
     // strip any subfolder portion up to spotcomm-hris/
     if (preg_match('#spotcomm-hris/(.*)$#i', $here, $m)) $here = $m[1];
     $link = ltrim($link, '/');
-    return rtrim($here, '/') === rtrim($link, '/');
+    $qs = '';
+    if (strpos($link, '?') !== false) { [$link, $qs] = explode('?', $link, 2); }
+    $norm = fn($p) => preg_replace('#/index\.php$#', '', rtrim($p, '/'));
+    if ($norm($here) !== $norm($link)) return false;
+    // when the link carries a query (e.g. ?tab=desk) require it to match the current request
+    if ($qs !== '') {
+        parse_str($qs, $want);
+        foreach ($want as $k => $v) if (($_GET[$k] ?? null) != $v) return false;
+    }
+    return true;
 }
 
 function render_topbar($pageTitle = '')

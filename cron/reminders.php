@@ -45,12 +45,21 @@ $checkoutTime = get_setting('reminder_checkout_time', '19:00');
 $employees = fetch_all("SELECT * FROM employees WHERE status = 'Active'");
 $log[] = "Running reminders at $now for " . count($employees) . " employees";
 
+// Keep the attendance sheet complete (auto Absent for past working days)
+$absents = att_sync_absents(true);
+$log[] = "Auto-absent sync: $absents day(s) marked";
+
 foreach ($employees as $emp) {
     // Skip if no contact info
     if (empty($emp['whatsapp']) && empty($emp['email'])) continue;
 
+    // Skip weekly off / public holidays — no reminder needed
+    if (att_day_kind($emp, $today) !== 'work') continue;
+
     // Get today's attendance
     $att = fetch_one("SELECT * FROM attendance WHERE employee_id = ? AND attendance_date = ?", [$emp['id'], $today]);
+    // On approved leave / holiday rows nothing to remind
+    if ($att && !$att['clock_in'] && !in_array($att['status'], ['present', 'late', 'absent', 'half_day'])) continue;
 
     // --- REMINDER 1: Forgot to check-in ---
     if ($checkinEnabled && $now >= $checkinTime) {

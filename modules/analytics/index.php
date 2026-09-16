@@ -24,10 +24,10 @@ $avgTenureMonths = $avgTenureRow ? round($avgTenureRow['avg_days'] / 30.44, 1) :
 
 // ===== 2. ATTENDANCE ANALYTICS (Last 30 days) =====
 $attStats = fetch_one("SELECT 
-    SUM(CASE WHEN status='present' THEN 1 ELSE 0 END) as present,
+    SUM(CASE WHEN status IN(" . att_sql_in(array_diff(att_present_statuses(), ['late'])) . ") THEN 1 ELSE 0 END) as present,
     SUM(CASE WHEN status='late' THEN 1 ELSE 0 END) as late,
     SUM(CASE WHEN status='absent' THEN 1 ELSE 0 END) as absent,
-    SUM(CASE WHEN status IN('casual_leave','medical_leave','compensated_leave','leave') THEN 1 ELSE 0 END) as on_leave,
+    SUM(CASE WHEN status IN(" . att_sql_in(att_leave_statuses()) . ") THEN 1 ELSE 0 END) as on_leave,
     SUM(CASE WHEN overtime_hours > 0 THEN 1 ELSE 0 END) as ot_days,
     SUM(overtime_hours) as total_ot,
     SUM(undertime_hours) as total_ut

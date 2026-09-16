@@ -51,7 +51,7 @@ register_shutdown_function(function () {
 _def('APP_NAME', 'Spotcomm HRIS');
 _def('APP_COMPANY', 'Spotcomm Global');
 _def('APP_TAGLINE', 'Outsource · Optimize · Thrive');
-_def('APP_VERSION', '6.2.8');
+_def('APP_VERSION', '6.3.0');
 _def('APP_ROOT', dirname(__DIR__));
 
 // ---- AUTO-DETECT APPLICATION URL ------------------------------------------
