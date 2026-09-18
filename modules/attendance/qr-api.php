@@ -87,13 +87,15 @@ if ($action === 'lookup') {
         $officeLat = (float)get_setting('att_office_lat', '0');
         $officeLng = (float)get_setting('att_office_lng', '0');
         $radius = (int)get_setting('att_geofence_radius', '200');
-        if ($location && strpos($location, ',') !== false) {
-            list($empLat, $empLng) = explode(',', $location);
+        $coordinates = explode(',', $location);
+        if (count($coordinates) === 2 && is_numeric($coordinates[0]) && is_numeric($coordinates[1])
+            && abs((float)$coordinates[0]) <= 90 && abs((float)$coordinates[1]) <= 180) {
+            list($empLat, $empLng) = $coordinates;
             $dist = calculateDistance((float)$empLat, (float)$empLng, $officeLat, $officeLng);
             if ($dist > $radius) {
                 json_response(['ok' => false, 'error' => "❌ You are " . round($dist) . "m from office. Attendance can only be marked within {$radius}m of the office location."]);
             }
-        } elseif ($location !== 'location-unavailable') {
+        } else {
             json_response(['ok' => false, 'error' => '❌ Could not verify your location. Please enable GPS and try again.']);
         }
     }
