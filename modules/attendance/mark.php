@@ -110,6 +110,7 @@ body{background:var(--grad-dark);min-height:100vh;margin:0}
 
 <div class="loading-overlay" id="loader"><div class="spin"></div></div>
 
+<script src="<?= asset('js/location.js') ?>?v=<?= filemtime(APP_ROOT.'/assets/js/location.js') ?>"></script>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script>
 var html5QrCode = null;
@@ -267,14 +268,14 @@ function showEmployee(data) {
 // --- Attendance marking flow with selfie + geofence ---
 var pendingCode = null, pendingAction = null, pendingLocation = null, pendingSelfie = null;
 var locationSettled = false, locationWaiters = [];
+var locationLoading = false, locationError = '', locationSession = 0;
 
 // Opens the FRONT camera automatically, location is resolved in the background.
 function startMark(code, action) {
   pendingCode = code;
   pendingAction = action;
   pendingSelfie = null;
-  locationSettled = false;
-  locationWaiters = [];
+  resetLocation();
 
   // Make sure the QR scanner released the camera device first
   stopScanner(function () {
@@ -289,24 +290,30 @@ function startMark(code, action) {
   });
 }
 
-// --- Location (never blocks the camera) ---
+// Location runs alongside the selfie, with only one request per session.
+function resetLocation() {
+  locationSession++;
+  pendingLocation = null;
+  locationSettled = false;
+  locationLoading = false;
+  locationError = '';
+  locationWaiters = [];
+}
+
 function fetchLocation() {
-  if (locationSettled) return;
-  var finish = function (loc) {
-    if (locationSettled) return;
+  if (locationSettled || locationLoading) return;
+  locationLoading = true;
+  var session = locationSession;
+  getLocation(function (loc, error) {
+    if (session !== locationSession) return;
+    locationLoading = false;
     locationSettled = true;
-    pendingLocation = loc || 'location-unavailable';
+    pendingLocation = loc;
+    locationError = error;
     var waiters = locationWaiters;
     locationWaiters = [];
-    waiters.forEach(function (fn) { try { fn(); } catch (e) {} });
-  };
-  if (!navigator.geolocation) { finish(null); return; }
-  setTimeout(function () { finish(null); }, 9000);
-  navigator.geolocation.getCurrentPosition(
-    function (pos) { finish(pos.coords.latitude + ',' + pos.coords.longitude); },
-    function () { finish(null); },
-    { timeout: 8000, enableHighAccuracy: true }
-  );
+    waiters.forEach(function (fn) { fn(); });
+  });
 }
 
 function whenLocationReady(cb) {
@@ -754,7 +761,15 @@ function doFinalMark() {
 
   // Location is normally already resolved while the employee was taking the photo
   fetchLocation();
-  whenLocationReady(function () { submitMark(); });
+  whenLocationReady(function () {
+    if (!pendingLocation) {
+      showLoader(false);
+      alert(locationError + '\nAttendance has not been marked. After fixing location access, tap Confirm or Clock In/Out to retry.');
+      resetLocation();
+      return;
+    }
+    submitMark();
+  });
 }
 
 function submitMark() {
@@ -806,6 +821,7 @@ function showCompleted(data) {
 }
 
 function resetAll() {
+  resetLocation();
   releaseCamera();
   pendingSelfie = null;
   document.getElementById('mainCard').style.display = '';

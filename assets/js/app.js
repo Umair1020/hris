@@ -22,14 +22,6 @@ function liveClock(sel){
     el.textContent = d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
   } tick(); setInterval(tick,1000);
 }
-// get browser location (for attendance clock-in)
-function getLocation(cb){
-  if(!navigator.geolocation){ cb(null); return; }
-  navigator.geolocation.getCurrentPosition(
-    function(p){ cb(p.coords.latitude+','+p.coords.longitude); },
-    function(){ cb(null); },{timeout:8000, enableHighAccuracy:true}
-  );
-}
 // Clock-in/out from dashboard: captures location FIRST, then submits form
 function doClock(act, formId){
   var form=document.getElementById(formId||'clockForm');
@@ -38,9 +30,15 @@ function doClock(act, formId){
   var locInput=form.querySelector('[name=location]');
   if(actInput) actInput.value=act;
   if(locInput) locInput.value='location-unavailable';
-  var btn=event?event.target.closest('button'):null;
+  var btn=form.querySelector('button[type=submit], button');
+  var originalLabel=btn ? btn.innerHTML : '';
   if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Getting location...'; }
-  getLocation(function(loc){
+  getLocation(function(loc, error){
+    if(!loc){
+      if(btn){ btn.disabled=false; btn.innerHTML=originalLabel; }
+      alert(error);
+      return;
+    }
     if(locInput) locInput.value=loc||'location-unavailable';
     form.submit();
   });
