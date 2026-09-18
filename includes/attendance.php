@@ -479,6 +479,62 @@ function att_leave_status($leaveCode, $halfDay = false)
     return $map[$code] ?? 'leave';
 }
 
+/* ----------------------------------------------------------------------------
+ * LEAVE REQUEST → "TYPE" DISPLAY
+ * A half-day request still charges 0.5 day to the chosen balance
+ * (Casual / Medical / Annual ...), but everywhere it is listed the TYPE must
+ * read "Half Day" — otherwise a 0.5-day request looks like a full-day
+ * Casual Leave request.
+ * -------------------------------------------------------------------------- */
+
+/** Is this a half-day leave request row? */
+function leave_is_half_day($req)
+{
+    return is_array($req) && !empty($req['half_day']);
+}
+
+/** "1st half" / "2nd half" */
+function leave_half_session_label($req)
+{
+    return (is_array($req) && ($req['half_day_session'] ?? '') === 'second_half') ? '2nd half' : '1st half';
+}
+
+/** Plain-text type label: "Half Day (1st half)" for a half day, else the leave type name */
+function leave_type_label($req)
+{
+    if (leave_is_half_day($req)) return 'Half Day (' . leave_half_session_label($req) . ')';
+    return (string)($req['type_name'] ?? $req['name'] ?? 'Leave');
+}
+
+/**
+ * Badge HTML for the "Type" cell of a leave request.
+ * Half day  → amber "Half Day (1st/2nd half)" badge first, leave-type badge after it
+ * Full day  → the leave-type badge (with the emergency bolt when applicable)
+ */
+function leave_type_badge($req)
+{
+    $name  = (string)($req['type_name'] ?? $req['name'] ?? 'Leave');
+    $color = (string)($req['color'] ?? '#7F3E98');
+    $out   = '';
+    if (!empty($req['is_emergency'])) {
+        $out .= '<span class="badge badge-red" title="Emergency"><i class="fa-solid fa-bolt"></i></span> ';
+    }
+    if (leave_is_half_day($req)) {
+        $out .= '<span class="badge badge-amber"><i class="fa-solid fa-star-half-stroke"></i> Half Day ('
+              . leave_half_session_label($req) . ')</span> ';
+    }
+    $out .= '<span class="badge" style="background:' . e($color) . '20;color:' . e($color) . '">' . e($name) . '</span>';
+    return $out;
+}
+
+/** "Half Day (1st half · Casual Leave)" / "Casual Leave" — title used in notifications */
+function leave_request_title($req)
+{
+    $name = (string)($req['type_name'] ?? $req['lt_name'] ?? $req['name'] ?? 'Leave');
+    if (leave_is_half_day($req)) return 'Half Day (' . leave_half_session_label($req) . ' · ' . $name . ')';
+    return $name;
+}
+
 /**
  * Write an approved leave into the attendance sheet (one row per working day).
  * Off days & public holidays inside the range are skipped.

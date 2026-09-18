@@ -135,7 +135,7 @@ else:
       <?php if(!$requests): echo '<tr><td colspan="8" class="empty"><i class="fa-solid fa-inbox"></i>No leave requests yet</td></tr>';
       else: foreach($requests as $r): ?>
         <tr>
-          <td><span class="badge" style="background:<?= e($r['color']) ?>20;color:<?= e($r['color']) ?>"><?= e($r['type_name']) ?></span><?php if($r['half_day']): ?> <span class="badge badge-amber"><i class="fa-solid fa-star-half-stroke"></i> Half Day<?= ($r['half_day_session'] ?? '') === 'second_half' ? ' (2nd)' : ' (1st)' ?></span><?php endif; ?></td>
+          <td><?= leave_type_badge($r) ?></td>
           <td><?= format_date($r['start_date'],'d M Y') ?></td>
           <td><?= format_date($r['end_date'],'d M Y') ?></td>
           <td><?= $r['days'] ?></td>

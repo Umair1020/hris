@@ -83,8 +83,13 @@ if ($emp && $emp['manager_id']) {
 foreach (fetch_all("SELECT id FROM users WHERE role IN('hr','admin') AND status='active'") as $hrU) {
     notify($hrU['id'], 'New Leave Request', "{$emp['full_name']} requested $what", 'modules/leave/approvals.php');
 }
-notify(current_user_id(), 'Leave Submitted', "Your {$lt['name']} request ({$days} day(s)) is pending approval.", 'modules/leave/my.php');
-log_activity('Leave Requested', "{$lt['name']} $days days ($start to $end)");
+$halfLabel = $halfSession === 'second_half' ? '2nd half' : '1st half';
+notify(current_user_id(), 'Leave Submitted', $halfDay
+    ? "Your Half Day request ({$halfLabel} · {$lt['name']}, 0.5 day) is pending approval."
+    : "Your {$lt['name']} request ({$days} day(s)) is pending approval.", 'modules/leave/my.php');
+log_activity('Leave Requested', $halfDay
+    ? "Half Day ({$halfLabel}) of {$lt['name']} on $start"
+    : "{$lt['name']} $days days ($start to $end)");
 
 set_flash('success', $halfDay ? "Half Day request submitted for " . format_date($start) . " ({$lt['name']}, 0.5 day). Awaiting approval." : "Leave request submitted! {$days} day(s) of {$lt['name']}. Awaiting approval.");
 redirect(APP_URL.'modules/leave/my.php');

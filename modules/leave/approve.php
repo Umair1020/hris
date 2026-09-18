@@ -16,12 +16,13 @@ $step = $_POST['step'] ?? 'manager';
 $decision = $_POST['decision'] ?? '';
 $uid = current_employee_id(); // FIX: Use employee_id instead of user_id for manager comparison
 
-$lr = fetch_one("SELECT lr.*, lt.is_paid, lt.code, e.manager_id, e.full_name emp_name
+$lr = fetch_one("SELECT lr.*, lt.is_paid, lt.code, lt.name lt_name, e.manager_id, e.full_name emp_name
                  FROM leave_requests lr
                  JOIN leave_types lt ON lt.id=lr.leave_type_id
                  JOIN employees e ON e.id=lr.employee_id
                  WHERE lr.id=?", [$id]);
 if (!$lr) { set_flash('danger','Leave request not found.'); redirect(APP_URL.'modules/leave/approvals.php'); }
+$lrDesc = leave_request_title($lr); // "Half Day (1st half · Casual Leave)" / "Casual Leave"
 
 // authorization
 if ($step === 'manager') {
@@ -31,7 +32,7 @@ if ($step === 'manager') {
         'manager_id'=>$uid, 'manager_action_at'=>now(),
     ], 'id=?', [$id]);
     log_activity('Leave Manager '.($decision==='approve'?'Approval':'Rejection'), $lr['emp_name']);
-    notify_employee($lr['employee_id'], 'Leave Update', "Your leave request was ".($decision==='approve'?'approved':'rejected')." by your manager.", 'modules/leave/my.php');
+    notify_employee($lr['employee_id'], 'Leave Update', "Your {$lrDesc} request was ".($decision==='approve'?'approved':'rejected')." by your manager.", 'modules/leave/my.php');
     
     // FIX: If manager rejects, final status is rejected.
     if ($decision==='reject') {
@@ -39,7 +40,8 @@ if ($step === 'manager') {
     } 
     // FIX: If manager approves, check if HR already approved. If yes, mark final status approved.
     else {
-        $lr = fetch_one("SELECT lr.*, lt.is_paid, lt.code FROM leave_requests lr JOIN leave_types lt ON lt.id=lr.leave_type_id WHERE lr.id=?", [$id]); // Re-fetch to get latest HR status
+        $lr = fetch_one("SELECT lr.*, lt.is_paid, lt.code, lt.name lt_name FROM leave_requests lr JOIN leave_types lt ON lt.id=lr.leave_type_id WHERE lr.id=?", [$id]); // Re-fetch to get latest HR status
+        $lrDesc = leave_request_title($lr);
         if ($lr['hr_status'] === 'approved' || $lr['is_emergency']) {
             update('leave_requests',['status'=>'approved'],'id=?',[$id]);
             // deduct balance & mark attendance
@@ -50,7 +52,7 @@ if ($step === 'manager') {
                     ->execute([$lr['days'], $lr['employee_id'], $lr['leave_type_id'], date('Y', strtotime($lr['start_date']))]);
             }
             apply_leave_to_attendance($lr);
-            notify_employee($lr['employee_id'], 'Leave Approved ✅', "Your {$lr['days']}-day leave has been fully approved.", 'modules/leave/my.php');
+            notify_employee($lr['employee_id'], 'Leave Approved ✅', "Your {$lrDesc} request has been fully approved.", 'modules/leave/my.php');
         }
     }
 
@@ -63,11 +65,12 @@ if ($step === 'manager') {
     log_activity('Leave HR '.($decision==='approve'?'Approval':'Rejection'), $lr['emp_name']);
 
     // Re-fetch to get latest manager_status
-    $lr = fetch_one("SELECT lr.*, lt.is_paid, lt.code FROM leave_requests lr JOIN leave_types lt ON lt.id=lr.leave_type_id WHERE lr.id=?", [$id]);
+    $lr = fetch_one("SELECT lr.*, lt.is_paid, lt.code, lt.name lt_name FROM leave_requests lr JOIN leave_types lt ON lt.id=lr.leave_type_id WHERE lr.id=?", [$id]);
+    $lrDesc = leave_request_title($lr);
 
     if ($decision === 'reject') {
         update('leave_requests',['status'=>'rejected'],'id=?',[$id]);
-        notify_employee($lr['employee_id'],'Leave Rejected',"Your leave request was rejected by HR.",'modules/leave/my.php');
+        notify_employee($lr['employee_id'],'Leave Rejected',"Your {$lrDesc} request was rejected by HR.",'modules/leave/my.php');
     } else {
         // If HR approves, check if manager already approved (or it's an emergency bypass)
         if ($lr['is_emergency'] || $lr['manager_status']==='approved') {
@@ -82,7 +85,7 @@ if ($step === 'manager') {
             
             apply_leave_to_attendance($lr);
             
-            notify_employee($lr['employee_id'],'Leave Approved ✅',"Your {$lr['days']}-day leave has been fully approved.",'modules/leave/my.php');
+            notify_employee($lr['employee_id'],'Leave Approved ✅',"Your {$lrDesc} request has been fully approved.",'modules/leave/my.php');
         }
     }
 }
