@@ -120,8 +120,8 @@ $activities = fetch_all("SELECT * FROM activity_log ORDER BY id DESC LIMIT 8");
     <?php else: foreach($myLeaves as $l): ?>
       <div class="flex between center" style="padding:10px 0;border-bottom:1px solid var(--border)">
         <div>
-          <div class="bold"><?= e($l['type_name']) ?></div>
-          <div class="muted small"><?= format_date($l['start_date']) ?> → <?= format_date($l['end_date']) ?> · <?= $l['days'] ?> day(s)</div>
+          <div class="bold"><?= e(leave_type_label($l)) ?></div>
+          <div class="muted small"><?= leave_is_half_day($l) ? e($l['type_name']) . ' · ' : '' ?><?= format_date($l['start_date']) ?> → <?= format_date($l['end_date']) ?> · <?= $l['days'] ?> day(s)</div>
         </div>
         <span class="badge badge-<?= $l['status']==='approved'?'green':($l['status']==='rejected'?'red':'amber') ?>"><?= ucfirst($l['status']) ?></span>
       </div>
@@ -149,12 +149,12 @@ $activities = fetch_all("SELECT * FROM activity_log ORDER BY id DESC LIMIT 8");
         <thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th>Action</th></tr></thead>
         <tbody>
         <?php
-        $pend = fetch_all("SELECT lr.*, e.full_name, lt.name type_name FROM leave_requests lr JOIN employees e ON e.id=lr.employee_id JOIN leave_types lt ON lt.id=lr.leave_type_id WHERE lr.status='pending' AND e.manager_id=? ORDER BY lr.id DESC LIMIT 6", [$empId]);
+        $pend = fetch_all("SELECT lr.*, e.full_name, lt.name type_name, lt.color FROM leave_requests lr JOIN employees e ON e.id=lr.employee_id JOIN leave_types lt ON lt.id=lr.leave_type_id WHERE lr.status='pending' AND e.manager_id=? ORDER BY lr.id DESC LIMIT 6", [$empId]);
         if(!$pend): echo '<tr><td colspan="4" class="empty">No pending approvals 🎉</td></tr>';
         else: foreach($pend as $l): ?>
           <tr>
             <td><?= e($l['full_name']) ?></td>
-            <td><span class="badge badge-purple"><?= e($l['type_name']) ?></span></td>
+            <td><?= leave_type_badge($l) ?></td>
             <td class="small"><?= format_date($l['start_date'],'d M') ?> - <?= format_date($l['end_date'],'d M') ?></td>
             <td><a href="<?= url('modules/leave/approvals.php') ?>" class="btn btn-sm btn-light">Review</a></td>
           </tr>
